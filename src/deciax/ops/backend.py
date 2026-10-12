@@ -1,17 +1,15 @@
-"""Backend selection. Detection is deferred to first use so importing deciax (and
-CPU-only tests) never initialises the TPU."""
+"""Backend selection."""
 
-import functools
 from typing import Literal
-
-import jax
 
 type Impl = Literal["jax", "pallas"]
 
 
-@functools.cache
 def default_impl() -> Impl:
-    return "pallas" if jax.default_backend() == "tpu" else "jax"
+    # XLA's fused attention beats the Pallas flash kernel with a dense bias on TPU at
+    # Laya's shapes (laya-tpu fusion_bench, english bf16: 2.0 vs 5.1 ms at S=512), so
+    # Pallas is opt-in until a splash kernel with local masks is faster.
+    return "jax"
 
 
 def resolve(impl: str) -> Impl:

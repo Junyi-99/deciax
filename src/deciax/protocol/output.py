@@ -1,7 +1,6 @@
 """What a decision model returns for a batch of question rows."""
 
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
 import numpy as np
 import numpy.typing as npt
@@ -11,13 +10,12 @@ import numpy.typing as npt
 class DecisionOutput:
     """Host-side model outputs, one row per (state, question) sequence.
 
-    `option_logits` is [rows, K] with padded slots already filled; `option_mask` marks
-    the real options. `act_logits` is [rows, n_act]. `truncation` carries per-row
-    input statistics (e.g. state tokens dropped); `extras` is model-specific.
+    `option_logits` is [rows, K] (padded slots filled with -1e4), `option_mask` marks
+    the real options, `act_logits` is [rows, n_act], `input_tokens` the real tokens
+    per row.
     """
 
     option_logits: npt.NDArray[np.float32]
     option_mask: npt.NDArray[np.bool_]
     act_logits: npt.NDArray[np.float32]
-    truncation: list[dict[str, Any]] = field(default_factory=list)
-    extras: dict[str, Any] = field(default_factory=dict)
+    input_tokens: npt.NDArray[np.int64]

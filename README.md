@@ -36,16 +36,51 @@ Parity fixtures come from the PyTorch reference, Laya 0.4.4 at commit `682ac67`.
 | `src/deciax/runtime/` | Shape buckets and the jit engine. |
 | `src/deciax/serve/` | `python -m deciax.serve`: stdlib HTTP server. |
 
+## Usage
+
+```python
+import deciax
+
+decider = deciax.load("laya")  # or "laya-multilingual"; bf16 on TPU, fp32 elsewhere
+decider.decide(
+    {"user": "I was charged twice this month, please fix it."},
+    {
+        "intent": {
+            "type": "choice",
+            "instructions": "What does the user want?",
+            "criteria": {"billing": "payments, refunds", "other": "everything else"},
+        },
+        "urgency": {
+            "type": "score",
+            "instructions": "How urgent is this?",
+            "criteria": ["not urgent", "soon", "blocking"],
+        },
+        "angry": {"type": "noul", "instructions": "Is the user angry?"},
+    },
+)
+```
+
+The response has the same shape as Laya's `system_one` response. Install with `uv sync --extra tpu` on a TPU host.
+
 ## Status
 
-This is a skeleton. Implemented and tested so far:
-- Laya temperature calibration
-- `nn` primitives
-- reference attention
-- shape buckets
-- checkpoint registry
+The Laya inference path works end to end. The runtime needs only JAX and `tokenizers`; it does not need
+torch, transformers or laya. Parity against PyTorch Laya 0.4.4 (`tests/laya/`):
+- **Inputs**: tokenizer ids and `input_ids` / `marker_pos` match token for token.
+- **CPU fp32**: option and act logits are within 1e-3 (act logits within 1e-5 relative). Responses match
+  up to the last rounded digit.
+- **TPU bf16**: probabilities are within 0.02 and the argmax matches, with both the `jax` and `pallas`
+  attention.
 
-Every other module defines its interface and raises `NotImplementedError`.
+`impl="auto"` uses XLA attention, which is faster than the Pallas flash kernel at these shapes.
+
+Not yet supported:
+- the parallel option layout
+- per-language temperatures and binning maps
+- `predict_long` windowing
+- tournament selection
+- the HTTP server (`deciax.serve`)
+- benchmarks
 
 Laya is Apache-2.0 (https://github.com/NandhaKishorM/laya). Code ported from it is attributed in each
 module docstring.

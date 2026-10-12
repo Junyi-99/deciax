@@ -17,5 +17,8 @@
       "model_safetensors_sha256": "9d628fd971b700382ac6f65920a86f149777b2e748e0c955fb3b19695aa8f204"
     }
   },
-  "fixtures": []
+  "fixtures": [
+    "laya/laya-multilingual.json",
+    "laya/laya.json"
+  ]
 }

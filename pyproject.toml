@@ -59,3 +59,8 @@ files = ["src", "tests"]
 [[tool.mypy.overrides]]
 module = ["safetensors.*", "tokenizers.*"]
 ignore_missing_imports = true
+
+[tool.ruff.lint.per-file-ignores]
+# Laya raises ValueError for every malformed question, type errors included; its HTTP
+# server maps ValueError to 422, so the wire behaviour depends on keeping it.
+"src/deciax/protocol/types.py" = ["TRY004"]

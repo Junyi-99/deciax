@@ -1,28 +1,40 @@
 """The interface every decision-model family implements."""
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-import numpy as np
-import numpy.typing as npt
+import jax
 
 from deciax.protocol.output import DecisionOutput
 from deciax.protocol.types import Question, State
 
 
-class EncodedBatch(Protocol):
-    """Host arrays for one forward pass plus the bookkeeping needed to decode it."""
+@dataclass(frozen=True)
+class EncodedRow:
+    """One (state, question) sequence ready for collation."""
 
-    arrays: Mapping[str, npt.NDArray[Any]]
+    input_ids: list[int]
+    marker_pos: list[int]
+    qtype: int
+    state_stats: dict[str, Any] = field(default_factory=dict)
+    option_stats: dict[str, Any] = field(default_factory=dict)
 
 
 class DecisionModel(Protocol):
+    pad_token_id: int
+
     def encode(
-        self, states: Sequence[State], questions: Mapping[str, Question]
-    ) -> EncodedBatch: ...
+        self, state: State, questions: Mapping[Any, Question]
+    ) -> list[EncodedRow]: ...
 
-    def forward(self, batch: EncodedBatch) -> DecisionOutput: ...
+    def forward(
+        self, arrays: Mapping[str, jax.Array]
+    ) -> tuple[jax.Array, jax.Array]: ...
 
-    def calibrate(
-        self, logits: npt.NDArray[np.float32], qtype: str, k: int, lang: str | None
-    ) -> npt.NDArray[np.float64]: ...
+    def decode(
+        self,
+        rows: list[EncodedRow],
+        output: DecisionOutput,
+        questions: Mapping[Any, Question],
+    ) -> dict[str, Any]: ...

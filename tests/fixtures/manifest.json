@@ -1,0 +1,21 @@
+{
+  "reference": {
+    "package": "laya",
+    "version": "0.4.4",
+    "commit": "682ac6719faa5b1c04b529501feb93e58ee91f3d",
+    "repository": "https://github.com/NandhaKishorM/laya"
+  },
+  "checkpoints": {
+    "laya": {
+      "repo": "convaiinnovations/laya",
+      "revision": "55cf4c4ebb4ebe31b2550e8bdf3bd21b99753851",
+      "model_safetensors_sha256": "891102d372688fc2a094dac56a384bc537b87c63f21f9f3dac0be2b7cbc8d86c"
+    },
+    "laya-multilingual": {
+      "repo": "convaiinnovations/laya-multilingual",
+      "revision": "e4e9ddf21a7b1903b7acffd8814ad4307bf63a67",
+      "model_safetensors_sha256": "9d628fd971b700382ac6f65920a86f149777b2e748e0c955fb3b19695aa8f204"
+    }
+  },
+  "fixtures": []
+}

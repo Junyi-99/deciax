@@ -8,7 +8,16 @@ authors = [
     { name = "Junyi Hou", email = "hji200914@gmail.com" }
 ]
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "huggingface-hub>=1.0",
+    "jax>=0.11.2",
+    "numpy>=2.3",
+    "safetensors>=0.6",
+    "tokenizers>=0.22",
+]
+
+[project.optional-dependencies]
+tpu = ["jax[tpu]>=0.11.2"]
 
 [project.urls]
 Repository = "https://github.com/Junyi-99/deciax"
@@ -20,5 +29,33 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "mypy>=2.4",
     "pre-commit>=4.6.2",
+    "pytest>=9",
 ]
+# PyTorch reference for parity fixtures: `uv sync --group reference`.
+reference = [
+    "laya @ git+https://github.com/NandhaKishorM/laya@682ac6719faa5b1c04b529501feb93e58ee91f3d",
+    "torch>=2.12",
+    "transformers>=5",
+]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["tpu: needs a TPU (skipped elsewhere)"]
+
+[tool.mypy]
+strict = true
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["safetensors.*", "tokenizers.*"]
+ignore_missing_imports = true

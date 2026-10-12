@@ -2,11 +2,15 @@
 
 High-performance decision models on TPUs, powered by JAX and Pallas.
 
-## Usage
+## Install
 
 ```bash
 pip install deciax
 ```
+
+On TPU, `pip install "deciax[tpu]"` pulls in `jax[tpu]`.
+
+## Usage
 
 ```python
 import deciax

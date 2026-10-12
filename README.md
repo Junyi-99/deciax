@@ -17,17 +17,26 @@ import deciax
 
 decider = deciax.load("laya")  # or "laya-multilingual"; bf16 on TPU, fp32 elsewhere
 decider.decide(
-    {"user": "I was charged twice this month, please fix it."},
+    {
+        "user": "I was charged twice this month, please fix it.",
+    },
     {
         "intent": {
             "type": "choice",
             "instructions": "What does the user want?",
-            "criteria": {"billing": "payments, refunds", "other": "everything else"},
+            "criteria": {
+                "billing": "payments, refunds",
+                "other": "everything else",
+            },
         },
         "urgency": {
             "type": "score",
             "instructions": "How urgent is this?",
-            "criteria": ["not urgent", "soon", "blocking"],
+            "criteria": [
+                "not urgent",
+                "soon",
+                "blocking",
+            ],
         },
         "angry": {
             "type": "noul",

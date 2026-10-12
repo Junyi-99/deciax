@@ -31,13 +31,10 @@ def clamp_temperature(t: object, lo: float = TEMP_MIN, hi: float = TEMP_MAX) -> 
 
 
 class Calibration:
-    def __init__(
-        self,
-        temperature: Sequence[object],
-        temperature_by_options: Mapping[str, object],
-    ) -> None:
+    def __init__(self, temperature: Sequence[object], temperature_by_options: Mapping[str, object]) -> None:
         if len(temperature) != 3:
             raise ValueError(f"temperature must have 3 entries, got {temperature!r}")
+
         self.temperature = [clamp_temperature(t) for t in temperature]
         self.temperature_by_options = {
             k: clamp_temperature(v) for k, v in temperature_by_options.items()
@@ -46,6 +43,7 @@ class Calibration:
     def temperature_for(self, qtype: str, k: int, lang: str | None = None) -> float:
         if lang is not None:
             raise NotImplementedError("per-language temperatures")
+
         return self.temperature_by_options.get(
             temp_bucket(qtype, k), self.temperature[QTYPES[qtype]]
         )

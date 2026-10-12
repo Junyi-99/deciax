@@ -8,11 +8,20 @@ class Checkpoint:
     repo: str
     revision: str
     family: str
+    # Hub files the model reads; the repo also holds files deciax never loads.
+    files: tuple[str, ...] = (
+        "rl_agent_config.json",
+        "model.safetensors",
+        "encoder/*",
+        "tokenizer/*",
+    )
 
 
 MODELS: dict[str, Checkpoint] = {
     "laya": Checkpoint(
-        "convaiinnovations/laya", "55cf4c4ebb4ebe31b2550e8bdf3bd21b99753851", "laya"
+        "convaiinnovations/laya",
+        "55cf4c4ebb4ebe31b2550e8bdf3bd21b99753851",
+        "laya",
     ),
     "laya-multilingual": Checkpoint(
         "convaiinnovations/laya-multilingual",

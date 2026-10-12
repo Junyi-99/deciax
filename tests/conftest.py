@@ -29,13 +29,20 @@ def laya_fixture(name: str) -> dict[str, Any]:
 
 def checkpoint_dir(name: str) -> Path:
     """The cached checkpoint, or skip: tests never download weights."""
+    from huggingface_hub import snapshot_download
     from huggingface_hub.errors import LocalEntryNotFoundError
 
-    from deciax.loader import fetch
     from deciax.models import MODELS
 
     ckpt = MODELS[name]
     try:
-        return fetch(ckpt.repo, ckpt.revision, local_files_only=True)
+        return Path(
+            snapshot_download(
+                ckpt.repo,
+                revision=ckpt.revision,
+                allow_patterns=ckpt.files,
+                local_files_only=True,
+            )
+        )
     except LocalEntryNotFoundError:
         pytest.skip(f"{ckpt.repo}@{ckpt.revision[:8]} is not in the local HF cache")

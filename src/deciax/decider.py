@@ -1,12 +1,13 @@
 """Public entry point: encode a request, run the engine, decode typed answers."""
 
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 import jax
 import jax.numpy as jnp
+from huggingface_hub import snapshot_download
 
-from deciax.loader import fetch
 from deciax.models import MODELS
 from deciax.models.laya.model import LayaModel
 from deciax.protocol.output import DecisionOutput
@@ -82,7 +83,13 @@ def load(
     `dtype="auto"` is bf16 on TPU and fp32 elsewhere.
     """
     ckpt = MODELS[model]
-    path = fetch(ckpt.repo, revision or ckpt.revision)
+    path = Path(
+        snapshot_download(
+            ckpt.repo,
+            revision=revision or ckpt.revision,
+            allow_patterns=ckpt.files,
+        )
+    )
     if dtype == "auto":
         dtype = "bf16" if jax.default_backend() == "tpu" else "fp32"
     jdtype = {"bf16": jnp.bfloat16, "fp32": jnp.float32}[dtype]

@@ -10,6 +10,15 @@ authors = [
 requires-python = ">=3.14"
 dependencies = []
 
+[project.urls]
+Repository = "https://github.com/Junyi-99/deciax"
+Issues = "https://github.com/Junyi-99/deciax/issues"
+
 [build-system]
 requires = ["uv_build>=0.10.6,<0.11.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.6.2",
+]

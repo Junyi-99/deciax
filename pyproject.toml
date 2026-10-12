@@ -1,0 +1,15 @@
+[project]
+name = "deciax"
+version = "0.1.0"
+description = "High-performance decision models on TPUs, powered by JAX and Pallas."
+keywords = ["decision-models", "jax", "pallas", "tpu"]
+readme = "README.md"
+authors = [
+    { name = "Junyi Hou", email = "hji200914@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = []
+
+[build-system]
+requires = ["uv_build>=0.10.6,<0.11.0"]
+build-backend = "uv_build"

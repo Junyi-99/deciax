@@ -2,6 +2,8 @@
 per bucket rather than once per request shape. Padding is right-side and masked, so
 it does not change the real rows' outputs."""
 
+from __future__ import annotations
+
 from collections.abc import Sequence
 
 import numpy as np

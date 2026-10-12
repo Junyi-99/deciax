@@ -4,6 +4,8 @@ Request limits, the extra `x_jev_confidence` field and the strict-Jev projection
 laya/serve.py and laya/confidence.py (laya 0.4.4, Apache-2.0). Model-agnostic.
 """
 
+from __future__ import annotations
+
 import math
 import re
 from collections.abc import Mapping
@@ -125,7 +127,7 @@ def jev_confidence(answer: Mapping[str, Any]) -> float | None:
             p = [float(probabilities[key]) for key in sorted(probabilities, key=int)]
         else:
             p = [float(v) for v in probabilities.values()]
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
     if not all(math.isfinite(v) for v in p):
         return None

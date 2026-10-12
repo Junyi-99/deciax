@@ -1,5 +1,7 @@
 """Runs encoded rows through a model in bucketed chunks."""
 
+from __future__ import annotations
+
 import threading
 from collections.abc import Sequence
 

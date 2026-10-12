@@ -4,6 +4,8 @@ Temperatures are bucketed by question type and option count, fall back to the
 per-type temperature, and are clamped to [TEMP_MIN, TEMP_MAX] at load.
 """
 
+from __future__ import annotations
+
 import math
 from collections.abc import Mapping, Sequence
 
@@ -24,7 +26,7 @@ def clamp_temperature(t: object, lo: float = TEMP_MIN, hi: float = TEMP_MAX) -> 
 
     try:
         value = float(t)  # type: ignore[arg-type]
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return 1.0
 
     if not math.isfinite(value):

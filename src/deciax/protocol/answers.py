@@ -4,6 +4,8 @@ Port of the answer half of laya `Agent._decode_answers` plus `unpermute_probs`,
 `answer_confidence` and `confidence_from_probs` (laya 0.4.4, Apache-2.0).
 """
 
+from __future__ import annotations
+
 import math
 
 import numpy as np

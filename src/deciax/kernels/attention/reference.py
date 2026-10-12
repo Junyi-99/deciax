@@ -1,5 +1,7 @@
 """Pure-jnp attention: the numerical reference for every kernel."""
 
+from __future__ import annotations
+
 import jax
 import jax.numpy as jnp
 

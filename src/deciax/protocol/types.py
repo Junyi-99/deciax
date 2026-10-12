@@ -4,6 +4,8 @@ Validation and normalisation port laya `Agent._check_question` / `Agent._to_inte
 (laya 0.4.4, Apache-2.0).
 """
 
+from __future__ import annotations
+
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass

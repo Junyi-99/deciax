@@ -1,5 +1,7 @@
 """Registered checkpoints. One entry until a second model family exists."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 
 

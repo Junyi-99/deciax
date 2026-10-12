@@ -11,6 +11,8 @@ refused with 422 rather than ignored.
 stdlib `ThreadingHTTPServer` below is a thin adapter around it.
 """
 
+from __future__ import annotations
+
 import hmac
 import json
 import logging
@@ -272,7 +274,7 @@ def _parse_body(raw: bytes) -> Any:
         raise RequestError(413, "request body too large")
     try:
         return json.loads(raw)
-    except ValueError, RecursionError:
+    except (ValueError, RecursionError):
         raise RequestError(400, "request body must be valid JSON") from None
 
 

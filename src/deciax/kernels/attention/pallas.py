@@ -4,6 +4,8 @@ Port of the flash path of laya-tpu `scripts/jax_model.py`. The sequence is padde
 a multiple of the block size; padded keys are masked and padded queries dropped.
 """
 
+from __future__ import annotations
+
 import jax
 import jax.numpy as jnp
 

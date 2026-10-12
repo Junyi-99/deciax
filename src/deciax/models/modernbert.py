@@ -5,6 +5,8 @@ frequencies come from the per-layer-type thetas. Port of the encoder half of lay
 `scripts/jax_model.py` (validated against PyTorch there).
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Any
 

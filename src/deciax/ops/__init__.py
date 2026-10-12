@@ -1,5 +1,7 @@
 """The only place where the backend forks."""
 
+from __future__ import annotations
+
 import jax
 
 from deciax.ops.backend import resolve

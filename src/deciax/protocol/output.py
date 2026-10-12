@@ -1,5 +1,7 @@
 """What a decision model returns for a batch of question rows."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 
 import numpy as np

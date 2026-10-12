@@ -3,6 +3,8 @@
 Every option falls back to an environment variable (DECIAX_HOST, DECIAX_PORT, ...).
 """
 
+from __future__ import annotations
+
 import argparse
 import logging
 import os

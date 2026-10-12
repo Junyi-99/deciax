@@ -7,6 +7,8 @@ Port of laya `serialize_state`, `render_options`, `build_head`, `build_sequence`
 Sequential option layout only.
 """
 
+from __future__ import annotations
+
 import json
 from collections.abc import Mapping
 from typing import Any

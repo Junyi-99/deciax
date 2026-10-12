@@ -1,5 +1,7 @@
 """Backend-agnostic primitives. Matmuls run in the input dtype with fp32 accumulation."""
 
+from __future__ import annotations
+
 import jax
 import jax.numpy as jnp
 

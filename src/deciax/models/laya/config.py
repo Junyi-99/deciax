@@ -1,5 +1,7 @@
 """Checkpoint configuration: `rl_agent_config.json` + `encoder/config.json`."""
 
+from __future__ import annotations
+
 import json
 from dataclasses import dataclass, field
 from pathlib import Path

@@ -6,6 +6,8 @@ type_emb, scorer, act_head). Matrices are stored in the matmul dtype, vectors
 comes from rl_agent_config.json.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
 
 import jax

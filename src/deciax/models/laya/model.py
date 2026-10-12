@@ -1,5 +1,7 @@
 """Laya = ModernBERT encoder + decision heads, implementing `DecisionModel`."""
 
+from __future__ import annotations
+
 import functools
 from collections.abc import Mapping
 from pathlib import Path

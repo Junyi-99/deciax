@@ -11,6 +11,8 @@
 Port of the head half of laya-tpu `scripts/jax_model.py`.
 """
 
+from __future__ import annotations
+
 import jax
 import jax.numpy as jnp
 

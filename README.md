@@ -29,7 +29,10 @@ decider.decide(
             "instructions": "How urgent is this?",
             "criteria": ["not urgent", "soon", "blocking"],
         },
-        "angry": {"type": "noul", "instructions": "Is the user angry?"},
+        "angry": {
+            "type": "noul",
+            "instructions": "Is the user angry?",
+        },
     },
 )
 ```

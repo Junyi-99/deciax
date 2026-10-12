@@ -25,9 +25,5 @@ def test_sequences_match_reference(model: str) -> None:
             cfg.head_max_len,
         )
 
-        assert [r.input_ids for r in rows] == [r["input_ids"] for r in case["rows"]], (
-            case["name"]
-        )
-        assert [r.marker_pos for r in rows] == [
-            r["marker_pos"] for r in case["rows"]
-        ], case["name"]
+        assert [r.input_ids for r in rows] == [r["input_ids"] for r in case["rows"]], case["name"]
+        assert [r.marker_pos for r in rows] == [r["marker_pos"] for r in case["rows"]], case["name"]

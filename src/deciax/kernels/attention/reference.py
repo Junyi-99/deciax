@@ -15,9 +15,7 @@ def attention_mask(mask: jax.Array, window: int = 0) -> jax.Array:
     return allowed
 
 
-def attention(
-    q: jax.Array, k: jax.Array, v: jax.Array, mask: jax.Array, window: int = 0
-) -> jax.Array:
+def attention(q: jax.Array, k: jax.Array, v: jax.Array, mask: jax.Array, window: int = 0) -> jax.Array:
     """[B, S, H, Dh] -> [B, S, H, Dh] (fp32)."""
     scale = q.shape[-1] ** -0.5
     logits = (
@@ -31,9 +29,7 @@ def attention(
         * scale
     )
 
-    probs = jax.nn.softmax(
-        jnp.where(attention_mask(mask, window), logits, MASK_FILL), -1
-    )
+    probs = jax.nn.softmax(jnp.where(attention_mask(mask, window), logits, MASK_FILL), -1)
 
     return jnp.einsum(
         "bhst,bthd->bshd",

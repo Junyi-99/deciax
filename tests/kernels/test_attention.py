@@ -7,37 +7,25 @@ from deciax import ops
 from deciax.kernels.attention import reference
 
 
-def _inputs(
-    seed: int = 0, b: int = 2, s: int = 16, h: int = 2, d: int = 8
-) -> tuple[jax.Array, ...]:
+def _inputs(seed: int = 0, b: int = 2, s: int = 16, h: int = 2, d: int = 8) -> tuple[jax.Array, ...]:
     kq, kk, kv = jax.random.split(jax.random.key(seed), 3)
-    q, k, v = (
-        jax.random.normal(key, (b, s, h, d), jnp.float32) for key in (kq, kk, kv)
-    )
+    q, k, v = (jax.random.normal(key, (b, s, h, d), jnp.float32) for key in (kq, kk, kv))
     mask = jnp.ones((b, s), jnp.int32).at[1, s - 5 :].set(0)
     return q, k, v, mask
 
 
-def _naive(
-    q: np.ndarray, k: np.ndarray, v: np.ndarray, mask: np.ndarray, window: int
-) -> np.ndarray:
+def _naive(q: np.ndarray, k: np.ndarray, v: np.ndarray, mask: np.ndarray, window: int) -> np.ndarray:
     b, s, h, d = q.shape
     out = np.zeros_like(q)
 
     for bi in range(b):
         for hi in range(h):
             for i in range(s):
-                keys = [
-                    j
-                    for j in range(s)
-                    if mask[bi, j] and (not window or abs(i - j) <= window)
-                ]
+                keys = [j for j in range(s) if mask[bi, j] and (not window or abs(i - j) <= window)]
                 if not keys:  # padded query with no real key in its window; never read
                     continue
 
-                scores = np.array(
-                    [q[bi, i, hi] @ k[bi, j, hi] for j in keys]
-                ) / np.sqrt(d)
+                scores = np.array([q[bi, i, hi] @ k[bi, j, hi] for j in keys]) / np.sqrt(d)
                 w = np.exp(scores - scores.max())
                 out[bi, i, hi] = (w / w.sum()) @ v[bi, keys, hi]
 
@@ -52,9 +40,7 @@ def test_reference_matches_naive(window: int) -> None:
     want = _naive(np.asarray(q), np.asarray(k), np.asarray(v), np.asarray(mask), window)
 
     valid = np.asarray(mask, bool)
-    np.testing.assert_allclose(
-        np.asarray(got)[valid], want[valid], rtol=1e-5, atol=1e-5
-    )
+    np.testing.assert_allclose(np.asarray(got)[valid], want[valid], rtol=1e-5, atol=1e-5)
 
 
 def test_ops_dispatches_to_reference_off_tpu() -> None:

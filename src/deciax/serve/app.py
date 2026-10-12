@@ -120,9 +120,7 @@ class Service:
         self._admission = threading.BoundedSemaphore(max_concurrent)
 
     # -- routing ---------------------------------------------------------------------
-    def handle(
-        self, method: str, path: str, headers: Mapping[str, str], body: bytes
-    ) -> Response:
+    def handle(self, method: str, path: str, headers: Mapping[str, str], body: bytes) -> Response:
         path = path.split("?", 1)[0].rstrip("/") or "/"
         routes: dict[str, tuple[str, Callable[[bytes], Response]]] = {
             "/v1/systemone": ("POST", self._systemone),
@@ -167,20 +165,14 @@ class Service:
             "status": "ok",
             "loaded": sorted(self.deciders),
             "default_model": self.default_model,
-            "revisions": {
-                name: MODELS[name].revision
-                for name in sorted(self.deciders)
-                if name in MODELS
-            },
+            "revisions": {name: MODELS[name].revision for name in sorted(self.deciders) if name in MODELS},
             "device": self.device,
         }
 
     def _systemone(self, raw: bytes) -> Response:
         body = _parse_body(raw)
         if not isinstance(body, dict) or "questions" not in body:
-            raise RequestError(
-                400, "request body must be an object with a 'questions' field"
-            )
+            raise RequestError(400, "request body must be an object with a 'questions' field")
 
         state, questions = body.get("state"), body["questions"]
         check_request_limits(state, questions)
@@ -196,11 +188,7 @@ class Service:
 
     def _batch(self, raw: bytes) -> Response:
         body = _parse_body(raw)
-        if (
-            not isinstance(body, dict)
-            or "questions" not in body
-            or "states" not in body
-        ):
+        if not isinstance(body, dict) or "questions" not in body or "states" not in body:
             raise RequestError(
                 400,
                 "request body must be an object with 'states' and 'questions' fields",
@@ -214,17 +202,13 @@ class Service:
 
         decider = self.deciders[self.resolve_model(body.get("model"))]
         budgets = _budgets(body)
-        results, ms = self._infer(
-            lambda: decider.decide_batch(states, questions, **budgets)
-        )
+        results, ms = self._infer(lambda: decider.decide_batch(states, questions, **budgets))
 
         payload = {
             "results": [self._finish(r) for r in results],
             "total_usage": {
                 "input_tokens": sum(r["usage"].get("input_tokens", 0) for r in results),
-                "output_tokens": sum(
-                    r["usage"].get("output_tokens", 0) for r in results
-                ),
+                "output_tokens": sum(r["usage"].get("output_tokens", 0) for r in results),
             },
         }
         return Response(200, payload, _timing(ms))
@@ -242,9 +226,7 @@ class Service:
 
         text = str(model).strip()
         key = text.lower()
-        published = {
-            c.repo.lower(): name for name, c in MODELS.items() if c.repo != BUNDLE_REPO
-        }
+        published = {c.repo.lower(): name for name, c in MODELS.items() if c.repo != BUNDLE_REPO}
         name = published.get(key) or ALIASES.get(key)
 
         if name is None and key in UNAVAILABLE:
@@ -256,8 +238,7 @@ class Service:
             if text[:1] in ".~" or "/" in text or "\\" in text:
                 raise RequestError(
                     422,
-                    f"unknown model {text!r}; this server serves {sorted(self.deciders)}, "
-                    "or omit model to let the server choose",
+                    f"unknown model {text!r}; this server serves {sorted(self.deciders)}, or omit model to let the server choose",
                 )
             return self.default_model
 
@@ -283,11 +264,7 @@ class Service:
         return result, (time.perf_counter() - t0) * 1000.0
 
     def _finish(self, result: dict[str, Any]) -> dict[str, Any]:
-        return (
-            project_jev_strict(result)
-            if self.jev_strict
-            else add_jev_confidence(result)
-        )
+        return project_jev_strict(result) if self.jev_strict else add_jev_confidence(result)
 
 
 def _parse_body(raw: bytes) -> Any:
@@ -324,9 +301,7 @@ def _budgets(body: Mapping[str, Any]) -> dict[str, int]:
         if value <= 0:
             raise RequestError(422, f"{key} must be a positive integer")
         if value > MAX_TOKEN_BUDGET:
-            raise RequestError(
-                422, f"{key} exceeds the server cap ({value} > {MAX_TOKEN_BUDGET})"
-            )
+            raise RequestError(422, f"{key} exceeds the server cap ({value} > {MAX_TOKEN_BUDGET})")
 
         budgets[key] = value
 
@@ -377,9 +352,7 @@ class _Handler(BaseHTTPRequestHandler):
             body = self.rfile.read(n)
 
         headers = {k.lower(): v for k, v in self.headers.items()}
-        self._respond(
-            self.server.service.handle(self.command, self.path, headers, body)
-        )
+        self._respond(self.server.service.handle(self.command, self.path, headers, body))
 
     do_GET = do_POST = do_PUT = do_DELETE = do_PATCH = _dispatch
 
@@ -395,9 +368,7 @@ class _Server(ThreadingHTTPServer):
         self.service = service
 
 
-def make_server(
-    service: Service, host: str = "127.0.0.1", port: int = 8000
-) -> ThreadingHTTPServer:
+def make_server(service: Service, host: str = "127.0.0.1", port: int = 8000) -> ThreadingHTTPServer:
     """A bound, not yet serving, HTTP server (port 0 picks a free port)."""
     return _Server((host, port), service)
 

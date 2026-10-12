@@ -51,9 +51,7 @@ CONVERSATION = [
         "content": f"Turn {i}: the router keeps dropping the connection every few minutes.",
     }
     for i in range(60)
-] + [
-    {"role": "user", "content": "Forget all that, I just want to cancel my plan today."}
-]
+] + [{"role": "user", "content": "Forget all that, I just want to cancel my plan today."}]
 
 
 def cases(mask_token: str) -> list[dict[str, object]]:
@@ -110,9 +108,7 @@ def cases(mask_token: str) -> list[dict[str, object]]:
         {
             "name": "long_text_truncated_right",
             "state": "The service was fine. " * 300 + "Actually I am furious.",
-            "questions": {
-                "angry": {"type": "noul", "instructions": "Is the writer angry?"}
-            },
+            "questions": {"angry": {"type": "noul", "instructions": "Is the writer angry?"}},
         },
         {
             "name": "many_options_collapse",
@@ -121,10 +117,7 @@ def cases(mask_token: str) -> list[dict[str, object]]:
                 "team": {
                     "type": "choice",
                     "instructions": "Which team should take this?",
-                    "criteria": {
-                        f"team_{i:02d}": f"handles queue number {i} for regional accounts"
-                        for i in range(60)
-                    },
+                    "criteria": {f"team_{i:02d}": f"handles queue number {i} for regional accounts" for i in range(60)},
                 }
             },
         },
@@ -168,9 +161,7 @@ def export(name: str) -> None:
             {
                 "text": t,
                 "ids": tok(t, add_special_tokens=False)["input_ids"],
-                "ids_max48": tok(
-                    t, add_special_tokens=False, truncation=True, max_length=48
-                )["input_ids"],
+                "ids_max48": tok(t, add_special_tokens=False, truncation=True, max_length=48)["input_ids"],
             }
             for t in TEXTS
         ],
@@ -199,18 +190,10 @@ def export(name: str) -> None:
         out["cases"].append(
             {
                 **case,
-                "rows": [
-                    {"input_ids": it["ids"], "marker_pos": it["markers"]}
-                    for it in items
-                ],
-                "option_logits": [
-                    row[: len(it["markers"])]
-                    for row, it in zip(logits.float().tolist(), items)
-                ],
+                "rows": [{"input_ids": it["ids"], "marker_pos": it["markers"]} for it in items],
+                "option_logits": [row[: len(it["markers"])] for row, it in zip(logits.float().tolist(), items)],
                 "act_logits": act.float().tolist(),
-                "response": json.loads(
-                    json.dumps(agent.system_one(case["state"], questions))
-                ),
+                "response": json.loads(json.dumps(agent.system_one(case["state"], questions))),
             }
         )
 

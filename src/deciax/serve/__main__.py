@@ -28,19 +28,11 @@ def main() -> None:
         help="checkpoint to load (repeatable; default DECIAX_MODELS or laya)",
     )
     parser.add_argument("--default-model", default=env("DECIAX_DEFAULT_MODEL"))
-    parser.add_argument(
-        "--max-concurrent", type=int, default=int(env("DECIAX_MAX_CONCURRENT", "16"))
-    )
-    parser.add_argument(
-        "--jev-strict", action="store_true", default=_env_bool("DECIAX_JEV_STRICT")
-    )
+    parser.add_argument("--max-concurrent", type=int, default=int(env("DECIAX_MAX_CONCURRENT", "16")))
+    parser.add_argument("--jev-strict", action="store_true", default=_env_bool("DECIAX_JEV_STRICT"))
     parser.add_argument("--no-warmup", action="store_true")
-    parser.add_argument(
-        "--dtype", default=env("DECIAX_DTYPE", "auto"), choices=["auto", "bf16", "fp32"]
-    )
-    parser.add_argument(
-        "--impl", default=env("DECIAX_IMPL", "auto"), choices=["auto", "jax", "pallas"]
-    )
+    parser.add_argument("--dtype", default=env("DECIAX_DTYPE", "auto"), choices=["auto", "bf16", "fp32"])
+    parser.add_argument("--impl", default=env("DECIAX_IMPL", "auto"), choices=["auto", "jax", "pallas"])
     parser.add_argument("--log-level", default=env("DECIAX_LOG_LEVEL", "info"))
     args = parser.parse_args()
 
@@ -49,9 +41,7 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    models = args.models or [
-        m.strip() for m in env("DECIAX_MODELS", "laya").split(",") if m.strip()
-    ]
+    models = args.models or [m.strip() for m in env("DECIAX_MODELS", "laya").split(",") if m.strip()]
 
     serve(
         args.host,

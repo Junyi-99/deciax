@@ -34,9 +34,7 @@ class Decider:
 
         `max_len` / `head_max_len` override the checkpoint's token budgets.
         """
-        return self.decide_batch(
-            [state], questions, max_len=max_len, head_max_len=head_max_len
-        )[0]
+        return self.decide_batch([state], questions, max_len=max_len, head_max_len=head_max_len)[0]
 
     def decide_batch(
         self,
@@ -50,14 +48,9 @@ class Decider:
         parsed = parse_questions(questions)
         if not parsed:
             empty = {"input_tokens": 0, "output_tokens": 0}
-            return [
-                {"model": "laya-rl-agent", "answers": {}, "usage": dict(empty)}
-                for _ in states
-            ]
+            return [{"model": "laya-rl-agent", "answers": {}, "usage": dict(empty)} for _ in states]
 
-        per_state = [
-            self.model.encode(s, parsed, max_len, head_max_len) for s in states
-        ]
+        per_state = [self.model.encode(s, parsed, max_len, head_max_len) for s in states]
         out = self.engine.run([r for rows in per_state for r in rows])
 
         results, n = [], len(parsed)

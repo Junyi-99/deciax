@@ -32,9 +32,7 @@ class DecisionModel(Protocol):
         head_max_len: int | None = None,
     ) -> list[EncodedRow]: ...
 
-    def forward(
-        self, arrays: Mapping[str, jax.Array]
-    ) -> tuple[jax.Array, jax.Array]: ...
+    def forward(self, arrays: Mapping[str, jax.Array]) -> tuple[jax.Array, jax.Array]: ...
 
     def decode(
         self,

@@ -17,9 +17,7 @@ from deciax.runtime.engine import Engine
 from tests.conftest import checkpoint_dir, laya_fixture
 
 MODELS = ["laya", "laya-multilingual"]
-BF16_PROB_TOLERANCE = (
-    0.02  # laya-tpu's acceptance: probability max-abs error vs PyTorch fp32
-)
+BF16_PROB_TOLERANCE = 0.02  # laya-tpu's acceptance: probability max-abs error vs PyTorch fp32
 ROUNDING = 2e-4  # answers are rounded to 4 dp; fp32 noise can flip the last digit
 
 
@@ -106,14 +104,10 @@ def test_bf16_tpu(model_name: str, impl: str) -> None:
         for i, want in enumerate(case["option_logits"]):
             got = out.option_logits[i, : len(want)].astype(np.float64)
             ref = np.asarray(want, np.float64)
-            assert np.abs(softmax(got) - softmax(ref)).max() <= BF16_PROB_TOLERANCE, (
-                case["name"]
-            )
+            assert np.abs(softmax(got) - softmax(ref)).max() <= BF16_PROB_TOLERANCE, case["name"]
             assert got.argmax() == ref.argmax(), case["name"]
 
         act = np.asarray(case["act_logits"], np.float64)
         for i in range(len(act)):
-            diff = np.abs(
-                softmax(out.act_logits[i].astype(np.float64)) - softmax(act[i])
-            ).max()
+            diff = np.abs(softmax(out.act_logits[i].astype(np.float64)) - softmax(act[i])).max()
             assert diff <= BF16_PROB_TOLERANCE, case["name"]

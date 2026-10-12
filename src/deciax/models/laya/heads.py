@@ -53,10 +53,7 @@ def decision_heads(
             p[f"{k}.self_attn.in_proj_weight"],
             p[f"{k}.self_attn.in_proj_bias"],
         )
-        q, kk, v = (
-            z.reshape(batch, seq, d // HEAD_DIM, HEAD_DIM)
-            for z in jnp.split(y.astype(dtype), 3, -1)
-        )
+        q, kk, v = (z.reshape(batch, seq, d // HEAD_DIM, HEAD_DIM) for z in jnp.split(y.astype(dtype), 3, -1))
 
         att = ops.attention(q, kk, v, attention_mask, 0, impl)
         x = x + _linear(p, f"{k}.self_attn.out_proj", att.reshape(batch, seq, d))
@@ -68,12 +65,8 @@ def decision_heads(
         )
 
     m = jnp.take_along_axis(x, jnp.maximum(marker_pos, 0)[..., None], axis=1)
-    hidden = jax.nn.gelu(
-        _linear(p, "scorer.1", _norm(p, "scorer.0", m)), approximate=False
-    )
-    logits = jnp.where(
-        marker_mask, _linear(p, "scorer.3", hidden)[..., 0], OPTION_MASK_FILL
-    )
+    hidden = jax.nn.gelu(_linear(p, "scorer.1", _norm(p, "scorer.0", m)), approximate=False)
+    logits = jnp.where(marker_mask, _linear(p, "scorer.3", hidden)[..., 0], OPTION_MASK_FILL)
 
     probs = jax.nn.softmax(logits, -1)
     count = jnp.maximum(marker_mask.sum(-1), 2)
@@ -83,9 +76,7 @@ def decision_heads(
         top = jnp.concatenate([jnp.zeros_like(probs), probs], axis=-1)
     else:
         top = jnp.sort(probs, axis=-1)[:, -2:]
-    feats = jnp.stack(
-        [top[:, -1], top[:, -1] - top[:, -2], ent, count / OPTION_COUNT_SCALE], -1
-    )
+    feats = jnp.stack([top[:, -1], top[:, -1] - top[:, -2], ent, count / OPTION_COUNT_SCALE], -1)
     hidden = jax.nn.gelu(
         _linear(p, "act_head.0", jnp.concatenate([x[:, 0], feats], -1)),
         approximate=False,

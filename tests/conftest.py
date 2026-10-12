@@ -7,9 +7,7 @@ import pytest
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
-def pytest_collection_modifyitems(
-    config: pytest.Config, items: list[pytest.Item]
-) -> None:
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     """Skip `tpu` tests unless JAX's default backend is a TPU."""
     if not any("tpu" in item.keywords for item in items):
         return

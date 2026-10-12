@@ -22,9 +22,7 @@ def bucket(n: int, buckets: Sequence[int]) -> int:
     raise ValueError(f"{n} exceeds the largest bucket {max(buckets)}")
 
 
-def collate(
-    rows: Sequence[EncodedRow], pad_id: int
-) -> dict[str, npt.NDArray[np.generic]]:
+def collate(rows: Sequence[EncodedRow], pad_id: int) -> dict[str, npt.NDArray[np.generic]]:
     """Pad rows into the five model inputs at bucketed shapes."""
     n = bucket(len(rows), ROW_BUCKETS)
     s = bucket(max(len(r.input_ids) for r in rows), SEQ_BUCKETS)

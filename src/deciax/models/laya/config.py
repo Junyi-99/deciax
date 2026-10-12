@@ -24,9 +24,7 @@ class LayaConfig:
         if raw.get("option_layout", "sequential") != "sequential":
             raise NotImplementedError("only the sequential option layout is supported")
 
-        encoder = ModernBertConfig.from_hf(
-            json.loads((path / "encoder" / "config.json").read_text())
-        )
+        encoder = ModernBertConfig.from_hf(json.loads((path / "encoder" / "config.json").read_text()))
 
         return cls(
             encoder=encoder,

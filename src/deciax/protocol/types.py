@@ -82,9 +82,7 @@ def resolve_noul_labels(labels: Any = None) -> tuple[str, str]:
     if labels is None:
         labels = DEFAULT_NOUL_LABELS
 
-    message = (
-        "noul labels must map exactly 'false' and 'true' to distinct non-empty strings"
-    )
+    message = "noul labels must map exactly 'false' and 'true' to distinct non-empty strings"
 
     if not isinstance(labels, dict) or set(labels) != {"false", "true"}:
         raise ValueError(message)
@@ -141,93 +139,54 @@ def _check(qid: Any, raw: Any) -> None:
         raise ValueError(f"question id must be a non-empty string, got {qid!r}")
 
     if not isinstance(raw, dict):
-        raise ValueError(
-            f"question {qid!r}: definition must be a dict, got {type(raw).__name__}"
-        )
+        raise ValueError(f"question {qid!r}: definition must be a dict, got {type(raw).__name__}")
     t = raw.get("type")
     if not isinstance(t, str) or t not in QTYPES:
-        raise ValueError(
-            f"question {qid!r}: unknown type {t!r}; use one of {sorted(QTYPES)}"
-        )
+        raise ValueError(f"question {qid!r}: unknown type {t!r}; use one of {sorted(QTYPES)}")
 
     if "instructions" not in raw:
-        raise ValueError(
-            f"question {qid!r}: no 'instructions'; add the text the model should answer"
-        )
+        raise ValueError(f"question {qid!r}: no 'instructions'; add the text the model should answer")
     ins = raw["instructions"]
     if ins is None:
         raise ValueError(f"question {qid!r}: 'instructions' must not be None")
-    if (isinstance(ins, str) and not ins.strip()) or (
-        isinstance(ins, (list, dict)) and not ins
-    ):
+    if (isinstance(ins, str) and not ins.strip()) or (isinstance(ins, (list, dict)) and not ins):
         raise ValueError(f"question {qid!r}: 'instructions' must not be empty")
     if not isinstance(ins, (str, dict, list, int, float)):
-        raise ValueError(
-            f"question {qid!r}: 'instructions' must be a string, dict, or list, "
-            f"got {type(ins).__name__}"
-        )
+        raise ValueError(f"question {qid!r}: 'instructions' must be a string, dict, or list, got {type(ins).__name__}")
 
     crit = raw.get("criteria")
     if t == "choice":
         if not isinstance(crit, (dict, list)):
-            raise ValueError(
-                f"question {qid!r}: a choice question takes 'criteria' as a dict of "
-                "label -> description, or a list of labels"
-            )
+            raise ValueError(f"question {qid!r}: a choice question takes 'criteria' as a dict of label -> description, or a list of labels")
         if not crit:
-            raise ValueError(
-                f"question {qid!r}: a choice question needs at least one criterion"
-            )
+            raise ValueError(f"question {qid!r}: a choice question needs at least one criterion")
         _check_choice_labels(qid, crit)
     elif t == "score":
         if not isinstance(crit, list):
-            raise ValueError(
-                f"question {qid!r}: a score question takes 'criteria' as a list of level "
-                "descriptions, index 0 first"
-            )
+            raise ValueError(f"question {qid!r}: a score question takes 'criteria' as a list of level descriptions, index 0 first")
         if not crit:
-            raise ValueError(
-                f"question {qid!r}: a score question needs at least one level"
-            )
+            raise ValueError(f"question {qid!r}: a score question needs at least one level")
         if None in crit:
-            raise ValueError(
-                f"question {qid!r}: score level {crit.index(None)} is null"
-            )
+            raise ValueError(f"question {qid!r}: score level {crit.index(None)} is null")
     elif crit is not None and not isinstance(crit, dict):
-        raise ValueError(
-            f"question {qid!r}: a noul question takes 'criteria' as a dict with optional "
-            "'true'/'false' descriptions, or omits it"
-        )
+        raise ValueError(f"question {qid!r}: a noul question takes 'criteria' as a dict with optional 'true'/'false' descriptions, or omits it")
     elif isinstance(crit, dict):
         keys = {str(k).lower() for k in crit}
         if not keys <= {"true", "false"}:
             raise ValueError(
-                f"question {qid!r}: a noul question takes 'criteria' keyed only "
-                f"'true'/'false', got {sorted(keys)}; use 'labels' to reword the answer"
+                f"question {qid!r}: a noul question takes 'criteria' keyed only 'true'/'false', got {sorted(keys)}; use 'labels' to reword the answer"
             )
 
     if "option_order" in raw:
         order = raw["option_order"]
         n = _option_count(raw)
-        ints = (
-            [i for i in order if isinstance(i, int) and not isinstance(i, bool)]
-            if isinstance(order, (list, tuple))
-            else []
-        )
-        if (
-            not isinstance(order, (list, tuple))
-            or len(order) != n
-            or sorted(ints) != list(range(n))
-        ):
-            raise ValueError(
-                f"question {qid!r}: 'option_order' must be a permutation of range({n}), got {order!r}"
-            )
+        ints = [i for i in order if isinstance(i, int) and not isinstance(i, bool)] if isinstance(order, (list, tuple)) else []
+        if not isinstance(order, (list, tuple)) or len(order) != n or sorted(ints) != list(range(n)):
+            raise ValueError(f"question {qid!r}: 'option_order' must be a permutation of range({n}), got {order!r}")
 
     if "labels" in raw:
         if t != "noul":
-            raise ValueError(
-                f"question {qid!r}: 'labels' is only supported for noul questions"
-            )
+            raise ValueError(f"question {qid!r}: 'labels' is only supported for noul questions")
         try:
             resolve_noul_labels(raw["labels"])
         except ValueError as e:

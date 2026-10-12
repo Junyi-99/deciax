@@ -34,10 +34,7 @@ class ModernBertConfig:
         """From an HF `encoder/config.json` (transformers 4.x or 5.x layout)."""
         n = config["num_hidden_layers"]
         layer_types = config.get("layer_types") or [
-            "full_attention"
-            if i % config.get("global_attn_every_n_layers", 3) == 0
-            else "sliding_attention"
-            for i in range(n)
+            "full_attention" if i % config.get("global_attn_every_n_layers", 3) == 0 else "sliding_attention" for i in range(n)
         ]
 
         theta = dict(DEFAULT_THETA)
@@ -58,8 +55,7 @@ class ModernBertConfig:
             layer_types=tuple(layer_types),
             norm_eps=config.get("norm_eps", 1e-5),
             rope_theta=tuple(sorted(theta.items())),
-            window=config.get("sliding_window")
-            or config.get("local_attention", 128) // 2,
+            window=config.get("sliding_window") or config.get("local_attention", 128) // 2,
         )
 
 
@@ -89,16 +85,8 @@ def encode(
 
     for i, layer_type in enumerate(cfg.layer_types):
         k = f"encoder.layers.{i}"
-        y = (
-            _norm(p, f"{k}.attn_norm", x, cfg.norm_eps)
-            if f"{k}.attn_norm.weight" in p
-            else x
-        )
-        qkv = (
-            _linear(p, f"{k}.attn.Wqkv", y)
-            .astype(dtype)
-            .reshape(batch, seq, 3, heads, dh)
-        )
+        y = _norm(p, f"{k}.attn_norm", x, cfg.norm_eps) if f"{k}.attn_norm.weight" in p else x
+        qkv = _linear(p, f"{k}.attn.Wqkv", y).astype(dtype).reshape(batch, seq, 3, heads, dh)
 
         q = nn.apply_rope(qkv[:, :, 0], inv_freq[layer_type])
         kk = nn.apply_rope(qkv[:, :, 1], inv_freq[layer_type])
@@ -106,9 +94,7 @@ def encode(
         att = ops.attention(q, kk, qkv[:, :, 2], attention_mask, window, impl)
         x = x + _linear(p, f"{k}.attn.Wo", att.reshape(batch, seq, -1))
 
-        h = _linear(
-            p, f"{k}.mlp.Wi", _norm(p, f"{k}.mlp_norm", x, cfg.norm_eps)
-        ).astype(dtype)
+        h = _linear(p, f"{k}.mlp.Wi", _norm(p, f"{k}.mlp_norm", x, cfg.norm_eps)).astype(dtype)
         a, b = jnp.split(h, 2, -1)
         x = x + _linear(p, f"{k}.mlp.Wo", jax.nn.gelu(a, approximate=False) * b)
 

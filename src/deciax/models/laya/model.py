@@ -25,16 +25,12 @@ MODEL_NAME = "laya-rl-agent"
 
 
 class LayaModel:
-    def __init__(
-        self, path: Path, dtype: jnp.dtype = jnp.bfloat16, impl: str = "auto"
-    ) -> None:
+    def __init__(self, path: Path, dtype: jnp.dtype = jnp.bfloat16, impl: str = "auto") -> None:
         self.config = LayaConfig.from_dir(path)
         self.tokenizer = LayaTokenizer(path / "tokenizer")
         self.pad_token_id = self.tokenizer.pad_token_id
 
-        self.calibration = Calibration(
-            self.config.temperature, self.config.temperature_by_options
-        )
+        self.calibration = Calibration(self.config.temperature, self.config.temperature_by_options)
 
         self.dtype = dtype
         self.params = load_params(path / "model.safetensors", dtype)
@@ -50,9 +46,7 @@ class LayaModel:
         qtype: jax.Array,
         impl: str,
     ) -> tuple[jax.Array, jax.Array]:
-        h = modernbert.encode(
-            params, self.config.encoder, input_ids, attention_mask, self.dtype, impl
-        )
+        h = modernbert.encode(params, self.config.encoder, input_ids, attention_mask, self.dtype, impl)
 
         return decision_heads(
             params,
@@ -114,9 +108,7 @@ class LayaModel:
             "state_tokens": stats[0]["state_tokens"],
             "state_tokens_dropped": dropped,
             "truncated": dropped > 0,
-            "truncated_questions": [
-                qid for qid, s in zip(questions, stats, strict=True) if s["truncated"]
-            ],
+            "truncated_questions": [qid for qid, s in zip(questions, stats, strict=True) if s["truncated"]],
         }
 
         collapsed = {

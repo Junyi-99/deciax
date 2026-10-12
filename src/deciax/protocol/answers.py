@@ -56,9 +56,7 @@ def to_answer(question: Question, slot_probs: Probs, act_probability: float) -> 
         return {
             "type": "choice",
             "choice": keys[int(p.argmax())],
-            "probabilities": {
-                kk: round(float(v), 4) for kk, v in zip(keys, p, strict=True)
-            },
+            "probabilities": {kk: round(float(v), 4) for kk, v in zip(keys, p, strict=True)},
             "confidence": round(confidence_from_probs(p, k), 4),
             "answer_confidence": ans_conf,
             "action": {"act_probability": action["act_probability"]},
@@ -68,9 +66,7 @@ def to_answer(question: Question, slot_probs: Probs, act_probability: float) -> 
         return {
             "type": "score",
             "score": round(float((np.arange(k) * p).sum()), 4),
-            "legend": {
-                str(i): render_criterion(c) for i, c in enumerate(question.criteria)
-            },
+            "legend": {str(i): render_criterion(c) for i, c in enumerate(question.criteria)},
             "probabilities": {str(i): round(float(v), 4) for i, v in enumerate(p)},
             "confidence": round(confidence_from_probs(p, k), 4),
             "answer_confidence": ans_conf,

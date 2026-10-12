@@ -31,10 +31,7 @@ def serialize_state(state: State) -> str:
 def render_options(q: Question) -> list[str]:
     """Option texts in label-index order; noul is always [false, true]."""
     if q.type == "choice":
-        return [
-            str(k) if v is None or v == "" else f"{k}: {render_criterion(v)}"
-            for k, v in q.criteria.items()
-        ]
+        return [str(k) if v is None or v == "" else f"{k}: {render_criterion(v)}" for k, v in q.criteria.items()]
 
     if q.type == "score":
         return [f"level {i}: {render_criterion(c)}" for i, c in enumerate(q.criteria)]
@@ -44,36 +41,18 @@ def render_options(q: Question) -> list[str]:
     false_crit, true_crit = crit.get("false"), crit.get("true")
 
     return [
-        false_label
-        + ": "
-        + (
-            render_criterion(false_crit)
-            if false_crit not in (None, "")
-            else "no, the statement does not hold"
-        ),
-        true_label
-        + ": "
-        + (
-            render_criterion(true_crit)
-            if true_crit not in (None, "")
-            else "yes, the statement holds"
-        ),
+        false_label + ": " + (render_criterion(false_crit) if false_crit not in (None, "") else "no, the statement does not hold"),
+        true_label + ": " + (render_criterion(true_crit) if true_crit not in (None, "") else "yes, the statement holds"),
     ]
 
 
-def build_head(
-    tok: LayaTokenizer, q: Question, head_max_len: int
-) -> tuple[list[int], list[int], dict[str, Any]]:
+def build_head(tok: LayaTokenizer, q: Question, head_max_len: int) -> tuple[list[int], list[int], dict[str, Any]]:
     """(head ids, marker positions, option stats) for the question half."""
     mask = tok.mask_token
     opts = render_options(q)
     order = q.option_order if q.option_order is not None else range(len(opts))
     head_ids = tok.encode(f"{q.type} question: {q.instructions.replace(mask, ' ')}")
-    opt_ids = [
-        [tok.mask_token_id]
-        + tok.encode(" " + opts[i].replace(mask, " "), OPTION_MAX_TOKENS)
-        for i in order
-    ]
+    opt_ids = [[tok.mask_token_id] + tok.encode(" " + opts[i].replace(mask, " "), OPTION_MAX_TOKENS) for i in order]
 
     opt_budget = head_max_len - sum(len(o) for o in opt_ids)
     per_option = None
@@ -109,11 +88,7 @@ def build_sequence(
     ids, markers, option_stats = build_head(tok, q, head_max_len)
 
     room = max(0, max_len - len(ids) - 1)
-    st = (
-        state_ids[max(0, len(state_ids) - room) :]
-        if truncate_left
-        else state_ids[:room]
-    )
+    st = state_ids[max(0, len(state_ids) - room) :] if truncate_left else state_ids[:room]
     ids = [*ids, *st, tok.sep_token_id][:max_len]
 
     return EncodedRow(
@@ -143,9 +118,7 @@ def encode_state(
 
     rows = []
     for qid, q in questions.items():
-        row = build_sequence(
-            tok, q, state_ids, max_len, head_max_len, isinstance(state, list)
-        )
+        row = build_sequence(tok, q, state_ids, max_len, head_max_len, isinstance(state, list))
         if len(row.marker_pos) != q.option_count:
             raise ValueError(
                 f"question {qid!r}: only {len(row.marker_pos)} of its {q.option_count} option "

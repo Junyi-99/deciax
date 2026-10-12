@@ -26,9 +26,7 @@ class Engine:
             arrays = collate(part, self.model.pad_token_id)
 
             with self._lock:
-                out = self.model.forward(
-                    {key: jax.device_put(v) for key, v in arrays.items()}
-                )
+                out = self.model.forward({key: jax.device_put(v) for key, v in arrays.items()})
                 lg, act = (np.asarray(v, np.float32) for v in out)
 
             n = len(part)

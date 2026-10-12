@@ -17,9 +17,7 @@ def linear(x: jax.Array, weight: jax.Array, bias: jax.Array | None = None) -> ja
     return y if bias is None else y + bias
 
 
-def layer_norm(
-    x: jax.Array, weight: jax.Array, bias: jax.Array | None, eps: float
-) -> jax.Array:
+def layer_norm(x: jax.Array, weight: jax.Array, bias: jax.Array | None, eps: float) -> jax.Array:
     """LayerNorm computed in fp32."""
     x = x.astype(jnp.float32)
     z = x - x.mean(-1, keepdims=True)

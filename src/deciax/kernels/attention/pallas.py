@@ -12,9 +12,7 @@ from deciax.kernels.attention.reference import MASK_FILL, attention_mask
 BLOCK = 128
 
 
-def attention(
-    q: jax.Array, k: jax.Array, v: jax.Array, mask: jax.Array, window: int = 0
-) -> jax.Array:
+def attention(q: jax.Array, k: jax.Array, v: jax.Array, mask: jax.Array, window: int = 0) -> jax.Array:
     """[B, S, H, Dh] -> [B, S, H, Dh] (fp32)."""
     from jax.experimental.pallas.ops.tpu.flash_attention import (
         BlockSizes,
@@ -36,8 +34,6 @@ def attention(
         ab=bias,
         sm_scale=dh**-0.5,
         causal=False,
-        block_sizes=BlockSizes(
-            block_q=BLOCK, block_k_major=BLOCK, block_k=BLOCK, block_b=1
-        ),
+        block_sizes=BlockSizes(block_q=BLOCK, block_k_major=BLOCK, block_k=BLOCK, block_b=1),
     )
     return out.transpose(0, 2, 1, 3)[:, :seq].astype(jnp.float32)

@@ -33,11 +33,7 @@ class RequestError(Exception):
 def _state_length(state: Any) -> int:
     import json
 
-    return (
-        len(state)
-        if isinstance(state, str)
-        else len(json.dumps(state, ensure_ascii=False))
-    )
+    return len(state) if isinstance(state, str) else len(json.dumps(state, ensure_ascii=False))
 
 
 def check_request_limits(state: Any, questions: Any) -> None:
@@ -47,9 +43,7 @@ def check_request_limits(state: Any, questions: Any) -> None:
     if not isinstance(questions, dict):
         raise RequestError(400, "'questions' must be an object")
     if len(questions) > MAX_QUESTIONS:
-        raise RequestError(
-            413, f"too many questions ({len(questions)} > {MAX_QUESTIONS})"
-        )
+        raise RequestError(413, f"too many questions ({len(questions)} > {MAX_QUESTIONS})")
 
     total = 0
     for qid, q in questions.items():
@@ -73,8 +67,7 @@ def check_request_limits(state: Any, questions: Any) -> None:
             if None in crit:
                 raise RequestError(
                     422,
-                    f"score question {qid!r} has a null level at index {crit.index(None)}; "
-                    "give every level a description",
+                    f"score question {qid!r} has a null level at index {crit.index(None)}; give every level a description",
                 )
 
     if total > MAX_TOTAL_OPTIONS:
@@ -92,9 +85,7 @@ def check_batch_limits(states: Any, questions: Any) -> None:
     if not isinstance(states, list) or not states:
         raise RequestError(400, "'states' must be a non-empty list")
     if len(states) > MAX_BATCH_STATES:
-        raise RequestError(
-            413, f"too many states in batch ({len(states)} > {MAX_BATCH_STATES})"
-        )
+        raise RequestError(413, f"too many states in batch ({len(states)} > {MAX_BATCH_STATES})")
 
     for state in states:
         check_request_limits(state, questions)
@@ -124,11 +115,7 @@ def jev_confidence(answer: Mapping[str, Any]) -> float | None:
     score: max(0, 1 - sum(p_i * |i - mode|) / D), D the same sum for a uniform distribution.
     """
     kind, probabilities = answer.get("type"), answer.get("probabilities")
-    if (
-        kind not in ("choice", "score")
-        or not isinstance(probabilities, dict)
-        or not probabilities
-    ):
+    if kind not in ("choice", "score") or not isinstance(probabilities, dict) or not probabilities:
         return None
     if any(isinstance(v, bool) for v in probabilities.values()):
         return None
@@ -165,9 +152,7 @@ def add_jev_confidence(result: Mapping[str, Any]) -> dict[str, Any]:
     answers = {}
     for qid, answer in result["answers"].items():
         conf = jev_confidence(answer)
-        answers[qid] = (
-            answer if conf is None else {**answer, "x_jev_confidence": round(conf, 4)}
-        )
+        answers[qid] = answer if conf is None else {**answer, "x_jev_confidence": round(conf, 4)}
 
     return {**result, "answers": answers}
 

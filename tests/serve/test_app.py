@@ -50,9 +50,7 @@ class FakeDecider:
 
         return self._result()
 
-    def decide_batch(
-        self, states: Any, questions: Any, **kw: Any
-    ) -> list[dict[str, Any]]:
+    def decide_batch(self, states: Any, questions: Any, **kw: Any) -> list[dict[str, Any]]:
         return [self.decide(s, questions, **kw) for s in states]
 
 
@@ -64,9 +62,7 @@ def make(**kw: Any) -> tuple[Service, dict[str, FakeDecider]]:
     return Service(deciders, "laya-multilingual", **kw), deciders
 
 
-def post(
-    service: Service, body: Any, path: str = "/v1/systemone", **headers: str
-) -> Any:
+def post(service: Service, body: Any, path: str = "/v1/systemone", **headers: str) -> Any:
     raw = body if isinstance(body, bytes) else json.dumps(body).encode()
     return service.handle("POST", path, headers, raw)
 
@@ -76,9 +72,7 @@ def test_systemone_adds_jev_confidence_and_timing() -> None:
     r = post(service, {"state": "s", "questions": QUESTIONS})
     assert r.status == 200
     assert r.payload["answers"]["c"]["x_jev_confidence"] == 0.4
-    assert "X-Inference-Time-Ms" in r.headers and r.headers["Server-Timing"].startswith(
-        "inference;dur="
-    )
+    assert "X-Inference-Time-Ms" in r.headers and r.headers["Server-Timing"].startswith("inference;dur=")
 
 
 def test_jev_strict() -> None:
@@ -109,20 +103,12 @@ def test_model_resolution(model: str | None, served_by: str) -> None:
 @pytest.mark.parametrize("model", ["typed-decisions", "./ckpt", "someone/other-model"])
 def test_model_refused(model: str) -> None:
     service, _ = make()
-    assert (
-        post(service, {"state": "s", "questions": QUESTIONS, "model": model}).status
-        == 422
-    )
+    assert post(service, {"state": "s", "questions": QUESTIONS, "model": model}).status == 422
 
 
 def test_model_not_loaded() -> None:
     service = Service({"laya": FakeDecider("laya")}, "laya")
-    assert (
-        post(
-            service, {"state": "s", "questions": QUESTIONS, "model": "multilingual"}
-        ).status
-        == 422
-    )
+    assert post(service, {"state": "s", "questions": QUESTIONS, "model": "multilingual"}).status == 422
 
 
 @pytest.mark.parametrize(
@@ -167,9 +153,7 @@ def test_budgets_are_forwarded() -> None:
 
 def test_batch() -> None:
     service, _ = make()
-    r = post(
-        service, {"states": ["a", "b"], "questions": QUESTIONS}, "/v1/systemone/batch"
-    )
+    r = post(service, {"states": ["a", "b"], "questions": QUESTIONS}, "/v1/systemone/batch")
 
     assert r.status == 200
     assert len(r.payload["results"]) == 2
@@ -183,31 +167,19 @@ def test_batch() -> None:
     )
     assert bad.status == 422
 
-    assert (
-        post(
-            service, {"states": [], "questions": QUESTIONS}, "/v1/systemone/batch"
-        ).status
-        == 400
-    )
+    assert post(service, {"states": [], "questions": QUESTIONS}, "/v1/systemone/batch").status == 400
 
 
 def test_auth_and_health() -> None:
     service, _ = make(api_key="sekrit")
     assert post(service, {"state": "s", "questions": QUESTIONS}).status == 401
 
-    ok = post(
-        service, {"state": "s", "questions": QUESTIONS}, authorization="Bearer sekrit"
-    )
+    ok = post(service, {"state": "s", "questions": QUESTIONS}, authorization="Bearer sekrit")
     assert ok.status == 200
 
     assert service.handle("GET", "/health", {}, b"").payload == {"status": "ok"}
-    full = service.handle(
-        "GET", "/health", {"authorization": "Bearer sekrit"}, b""
-    ).payload
-    assert (
-        full["loaded"] == ["laya", "laya-multilingual"]
-        and full["default_model"] == "laya-multilingual"
-    )
+    full = service.handle("GET", "/health", {"authorization": "Bearer sekrit"}, b"").payload
+    assert full["loaded"] == ["laya", "laya-multilingual"] and full["default_model"] == "laya-multilingual"
 
 
 def test_routing_errors() -> None:
@@ -222,9 +194,7 @@ def test_busy_returns_503() -> None:
     decider = deciders["laya-multilingual"]
     decider.release.clear()
 
-    first = threading.Thread(
-        target=post, args=(service, {"state": "s", "questions": QUESTIONS})
-    )
+    first = threading.Thread(target=post, args=(service, {"state": "s", "questions": QUESTIONS}))
     first.start()
     while not decider.calls:
         pass

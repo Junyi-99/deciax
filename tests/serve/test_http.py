@@ -36,9 +36,7 @@ def server() -> Iterator[tuple[str, Decider]]:
 
 def call(url: str, body: Any = None) -> tuple[int, Any, dict[str, str]]:
     data = None if body is None else json.dumps(body).encode()
-    req = urllib.request.Request(
-        url, data=data, headers={"Content-Type": "application/json"}
-    )
+    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
 
     try:
         with urllib.request.urlopen(req, timeout=120) as r:

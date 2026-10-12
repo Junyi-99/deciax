@@ -39,17 +39,16 @@ uv run python -m deciax.serve --model laya --model laya-multilingual --default-m
 curl -s localhost:8000/v1/systemone -d '{"state": "I was charged twice", "questions": {"angry": {"type": "noul", "instructions": "Is the user angry?"}}}'
 ```
 
-The server speaks the same `/v1/systemone` wire protocol as `laya-serve`:
-- **Routes**: `POST /v1/systemone`, `POST /v1/systemone/batch` and `GET /health`.
-- **Requests and responses**: the same request limits and status codes, `x_jev_confidence` on choice and
-  score answers, `--jev-strict` and Bearer auth (`DECIAX_API_KEY`).
-- **Request controls**: `model`, `max_len` and `head_max_len`.
+Compared with `laya-serve`:
 
-There are two differences from `laya-serve`:
-- No language routing. A request with no `model`, the bundle id or an unknown id such as `jev-1` gets the
-  default model.
-- The controls deciax does not implement return 422 instead of being ignored: `task`, `lang`,
-  `lang_guess`, `min_confidence`, `batch_size` and `sort_by_length`.
+| | laya-serve | deciax |
+|---|---|---|
+| Routes `POST /v1/systemone`, `POST /v1/systemone/batch`, `GET /health` | same | same |
+| Request limits, status codes, `x_jev_confidence` on choice/score answers | same | same |
+| `--jev-strict`, Bearer auth (`DECIAX_API_KEY`) | same | same |
+| Controls `model`, `max_len`, `head_max_len` | same | same |
+| Language routing | routes by language | none; missing/unknown `model` (e.g. `jev-1`) gets the default model |
+| Controls `task`, `lang`, `lang_guess`, `min_confidence`, `batch_size`, `sort_by_length` | accepted | 422 |
 
 Every flag also reads an environment variable: `DECIAX_HOST`, `DECIAX_PORT`, `DECIAX_MODELS`,
 `DECIAX_DEFAULT_MODEL`, `DECIAX_MAX_CONCURRENT`, `DECIAX_JEV_STRICT`, `DECIAX_DTYPE`, `DECIAX_IMPL` and

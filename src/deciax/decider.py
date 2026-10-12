@@ -87,7 +87,7 @@ def load(
         snapshot_download(
             ckpt.repo,
             revision=revision or ckpt.revision,
-            allow_patterns=ckpt.files,
+            allow_patterns=list(ckpt.files),
         )
     )
     if dtype == "auto":

@@ -40,7 +40,7 @@ def checkpoint_dir(name: str) -> Path:
             snapshot_download(
                 ckpt.repo,
                 revision=ckpt.revision,
-                allow_patterns=ckpt.files,
+                allow_patterns=list(ckpt.files),
                 local_files_only=True,
             )
         )

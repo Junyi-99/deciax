@@ -64,14 +64,18 @@ class LayaModel:
         )
 
     def encode(
-        self, state: State, questions: Mapping[Any, Question]
+        self,
+        state: State,
+        questions: Mapping[Any, Question],
+        max_len: int | None = None,
+        head_max_len: int | None = None,
     ) -> list[EncodedRow]:
         return encode_state(
             self.tokenizer,
             state,
             questions,
-            self.config.max_len,
-            self.config.head_max_len,
+            self.config.max_len if max_len is None else max_len,
+            self.config.head_max_len if head_max_len is None else head_max_len,
         )
 
     def forward(self, arrays: Mapping[str, jax.Array]) -> tuple[jax.Array, jax.Array]:

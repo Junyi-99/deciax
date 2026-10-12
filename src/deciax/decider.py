@@ -22,13 +22,28 @@ class Decider:
         self.engine = Engine(model)
 
     def decide(
-        self, state: State, questions: Mapping[Any, Mapping[str, Any]]
+        self,
+        state: State,
+        questions: Mapping[Any, Mapping[str, Any]],
+        *,
+        max_len: int | None = None,
+        head_max_len: int | None = None,
     ) -> dict[str, Any]:
-        """Answer every question about one state (Laya `system_one` response)."""
-        return self.decide_batch([state], questions)[0]
+        """Answer every question about one state (Laya `system_one` response).
+
+        `max_len` / `head_max_len` override the checkpoint's token budgets.
+        """
+        return self.decide_batch(
+            [state], questions, max_len=max_len, head_max_len=head_max_len
+        )[0]
 
     def decide_batch(
-        self, states: Sequence[State], questions: Mapping[Any, Mapping[str, Any]]
+        self,
+        states: Sequence[State],
+        questions: Mapping[Any, Mapping[str, Any]],
+        *,
+        max_len: int | None = None,
+        head_max_len: int | None = None,
     ) -> list[dict[str, Any]]:
         """Answer the same questions about many states, sharing forward passes."""
         parsed = parse_questions(questions)
@@ -38,7 +53,9 @@ class Decider:
                 {"model": "laya-rl-agent", "answers": {}, "usage": dict(empty)}
                 for _ in states
             ]
-        per_state = [self.model.encode(s, parsed) for s in states]
+        per_state = [
+            self.model.encode(s, parsed, max_len, head_max_len) for s in states
+        ]
         out = self.engine.run([r for rows in per_state for r in rows])
         results, n = [], len(parsed)
         for i, rows in enumerate(per_state):

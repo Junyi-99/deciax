@@ -25,7 +25,11 @@ class DecisionModel(Protocol):
     pad_token_id: int
 
     def encode(
-        self, state: State, questions: Mapping[Any, Question]
+        self,
+        state: State,
+        questions: Mapping[Any, Question],
+        max_len: int | None = None,
+        head_max_len: int | None = None,
     ) -> list[EncodedRow]: ...
 
     def forward(

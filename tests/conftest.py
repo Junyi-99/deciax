@@ -17,6 +17,7 @@ def pytest_collection_modifyitems(
 
     if jax.default_backend() == "tpu":
         return
+
     skip = pytest.mark.skip(reason="needs a TPU")
     for item in items:
         if "tpu" in item.keywords:
@@ -35,6 +36,7 @@ def checkpoint_dir(name: str) -> Path:
     from deciax.models import MODELS
 
     ckpt = MODELS[name]
+
     try:
         return Path(
             snapshot_download(

@@ -20,18 +20,22 @@ class Engine:
         chunk = max(ROW_BUCKETS)
         k = max(len(r.marker_pos) for r in rows)
         logits, acts, masks = [], [], []
+
         for start in range(0, len(rows), chunk):
             part = rows[start : start + chunk]
             arrays = collate(part, self.model.pad_token_id)
+
             with self._lock:
                 out = self.model.forward(
                     {key: jax.device_put(v) for key, v in arrays.items()}
                 )
                 lg, act = (np.asarray(v, np.float32) for v in out)
+
             n = len(part)
             logits.append(lg[:n, :k])
             masks.append(arrays["marker_mask"][:n, :k])
             acts.append(act[:n])
+
         return DecisionOutput(
             option_logits=np.concatenate(logits),
             option_mask=np.concatenate(masks),

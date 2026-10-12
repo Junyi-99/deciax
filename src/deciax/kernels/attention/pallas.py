@@ -27,8 +27,10 @@ def attention(
         widths = ((0, 0), (0, padded - seq), (0, 0), (0, 0))
         q, k, v = (jnp.pad(x, widths) for x in (q, k, v))
         mask = jnp.pad(mask, ((0, 0), (0, padded - seq)))
+
     bias = jnp.where(attention_mask(mask, window), 0.0, MASK_FILL)
     bias = jnp.broadcast_to(bias, (batch, heads, padded, padded)).astype(jnp.float32)
+
     out: jax.Array = flash_attention(
         *(x.transpose(0, 2, 1, 3) for x in (q, k, v)),
         ab=bias,

@@ -22,6 +22,8 @@ def load_params(path: Path, dtype: jnp.dtype) -> dict[str, jax.Array]:
         for key in f.keys():  # noqa: SIM118 -- safe_open is not a mapping
             if key in SKIP:
                 continue
+
             value = np.asarray(f.get_tensor(key), np.float32)
             params[key] = jnp.asarray(value, dtype if value.ndim > 1 else jnp.float32)
+
     return params

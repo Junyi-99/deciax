@@ -23,9 +23,11 @@ class LayaConfig:
         raw = json.loads((path / "rl_agent_config.json").read_text())
         if raw.get("option_layout", "sequential") != "sequential":
             raise NotImplementedError("only the sequential option layout is supported")
+
         encoder = ModernBertConfig.from_hf(
             json.loads((path / "encoder" / "config.json").read_text())
         )
+
         return cls(
             encoder=encoder,
             max_len=raw.get("max_len", 512),

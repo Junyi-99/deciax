@@ -40,6 +40,7 @@ def test_clamp_temperature(raw: object, clamped: float) -> None:
 
 def test_bucket_then_type_fallback() -> None:
     cal = Calibration([1.2, 0.9, 2.0], {"choice:11+": 0.1006, "noul:2": 1.5})
+
     assert cal.temperature_for("choice", 12) == 0.5
     assert cal.temperature_for("choice", 4) == 1.2
     assert cal.temperature_for("noul", 2) == 1.5

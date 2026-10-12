@@ -35,8 +35,10 @@ def rope_inv_freq(head_dim: int, theta: float) -> jax.Array:
 def apply_rope(x: jax.Array, inv_freq: jax.Array) -> jax.Array:
     """Rotate-half RoPE on [B, S, H, Dh] using positions 0..S-1."""
     seq_len, half = x.shape[1], x.shape[-1] // 2
+
     freqs = jnp.arange(seq_len, dtype=jnp.float32)[:, None] * inv_freq[None, :]
     cos = jnp.concatenate([jnp.cos(freqs)] * 2, -1).astype(x.dtype)[None, :, None, :]
     sin = jnp.concatenate([jnp.sin(freqs)] * 2, -1).astype(x.dtype)[None, :, None, :]
+
     rotated = jnp.concatenate([-x[..., half:], x[..., :half]], -1)
     return (x * cos + rotated * sin).astype(x.dtype)

@@ -23,6 +23,7 @@ def _naive(
 ) -> np.ndarray:
     b, s, h, d = q.shape
     out = np.zeros_like(q)
+
     for bi in range(b):
         for hi in range(h):
             for i in range(s):
@@ -33,19 +34,23 @@ def _naive(
                 ]
                 if not keys:  # padded query with no real key in its window; never read
                     continue
+
                 scores = np.array(
                     [q[bi, i, hi] @ k[bi, j, hi] for j in keys]
                 ) / np.sqrt(d)
                 w = np.exp(scores - scores.max())
                 out[bi, i, hi] = (w / w.sum()) @ v[bi, keys, hi]
+
     return out
 
 
 @pytest.mark.parametrize("window", [0, 3])
 def test_reference_matches_naive(window: int) -> None:
     q, k, v, mask = _inputs()
+
     got = reference.attention(q, k, v, mask, window)
     want = _naive(np.asarray(q), np.asarray(k), np.asarray(v), np.asarray(mask), window)
+
     valid = np.asarray(mask, bool)
     np.testing.assert_allclose(
         np.asarray(got)[valid], want[valid], rtol=1e-5, atol=1e-5
@@ -64,6 +69,8 @@ def test_ops_dispatches_to_reference_off_tpu() -> None:
 @pytest.mark.parametrize("window", [0, 64])
 def test_pallas_matches_reference(window: int) -> None:
     q, k, v, mask = _inputs(b=2, s=256, h=4, d=64)
+
     got = ops.attention(q, k, v, mask, window, impl="pallas")
     want = reference.attention(q, k, v, mask, window)
+
     np.testing.assert_allclose(np.asarray(got), np.asarray(want), rtol=2e-2, atol=2e-2)

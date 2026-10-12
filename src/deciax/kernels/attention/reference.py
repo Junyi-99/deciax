@@ -30,9 +30,11 @@ def attention(
         )
         * scale
     )
+
     probs = jax.nn.softmax(
         jnp.where(attention_mask(mask, window), logits, MASK_FILL), -1
     )
+
     return jnp.einsum(
         "bhst,bthd->bshd",
         probs.astype(v.dtype),

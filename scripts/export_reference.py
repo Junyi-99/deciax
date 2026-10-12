@@ -160,6 +160,7 @@ def export(name: str) -> None:
     agent = laya.load(ckpt.repo, device="cpu", revision=ckpt.revision)
     agent.model.eval()
     tok = agent.tok
+
     out: dict[str, object] = {
         "model": name,
         "laya_version": laya.__version__,
@@ -175,14 +176,17 @@ def export(name: str) -> None:
         ],
         "cases": [],
     }
+
     for case in cases(tok.mask_token):
         questions = case["questions"]
         ids = list(questions)
         for qid, q in questions.items():
             agent._check_question(qid, q)
+
         internal = {qid: agent._to_internal(q) for qid, q in questions.items()}
         items = agent._encode_state(case["state"], ids, internal)
         batch = collate_items([items], tok.pad_token_id)
+
         with torch.no_grad():
             logits, act = agent.model(
                 batch["input_ids"],
@@ -191,6 +195,7 @@ def export(name: str) -> None:
                 batch["marker_mask"],
                 batch["qtype"],
             )
+
         out["cases"].append(
             {
                 **case,
@@ -208,6 +213,7 @@ def export(name: str) -> None:
                 ),
             }
         )
+
     path = FIXTURES / "laya" / f"{name}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(out, ensure_ascii=False) + "\n")
@@ -218,6 +224,7 @@ def main() -> None:
     torch.set_num_threads(8)
     for name in MODELS:
         export(name)
+
     manifest_path = FIXTURES / "manifest.json"
     manifest = json.loads(manifest_path.read_text())
     manifest["fixtures"] = sorted(f"laya/{name}.json" for name in MODELS)

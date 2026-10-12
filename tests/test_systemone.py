@@ -53,6 +53,7 @@ RESULT = {
 
 def test_add_jev_confidence_copies() -> None:
     out = add_jev_confidence(RESULT)
+
     assert out["answers"]["c"]["x_jev_confidence"] == 0.4
     assert "x_jev_confidence" not in out["answers"]["n"]
     assert "x_jev_confidence" not in RESULT["answers"]["c"]  # type: ignore[index]
@@ -60,6 +61,7 @@ def test_add_jev_confidence_copies() -> None:
 
 def test_project_jev_strict() -> None:
     out = project_jev_strict(RESULT)
+
     assert out["answers"]["c"] == {
         "type": "choice",
         "choice": "a",

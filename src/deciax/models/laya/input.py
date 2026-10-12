@@ -35,11 +35,14 @@ def render_options(q: Question) -> list[str]:
             str(k) if v is None or v == "" else f"{k}: {render_criterion(v)}"
             for k, v in q.criteria.items()
         ]
+
     if q.type == "score":
         return [f"level {i}: {render_criterion(c)}" for i, c in enumerate(q.criteria)]
+
     crit = q.criteria or {}
     false_label, true_label = resolve_noul_labels(q.labels)
     false_crit, true_crit = crit.get("false"), crit.get("true")
+
     return [
         false_label
         + ": "
@@ -71,6 +74,7 @@ def build_head(
         + tok.encode(" " + opts[i].replace(mask, " "), OPTION_MAX_TOKENS)
         for i in order
     ]
+
     opt_budget = head_max_len - sum(len(o) for o in opt_ids)
     per_option = None
     if opt_budget < 16:
@@ -78,12 +82,14 @@ def build_head(
         opt_ids = [o[:per_option] for o in opt_ids]
         opt_budget = head_max_len - sum(len(o) for o in opt_ids)
     head_ids = head_ids[: max(8, opt_budget)]
+
     ids = [tok.cls_token_id, *head_ids, tok.sep_token_id]
     markers = []
     for o in opt_ids:
         markers.append(len(ids))
         ids.extend(o)
     ids.append(tok.sep_token_id)
+
     stats = {
         "options": len(opt_ids),
         "options_distinct": len({tuple(o) for o in opt_ids}),
@@ -101,6 +107,7 @@ def build_sequence(
     truncate_left: bool = False,
 ) -> EncodedRow:
     ids, markers, option_stats = build_head(tok, q, head_max_len)
+
     room = max(0, max_len - len(ids) - 1)
     st = (
         state_ids[max(0, len(state_ids) - room) :]
@@ -108,6 +115,7 @@ def build_sequence(
         else state_ids[:room]
     )
     ids = [*ids, *st, tok.sep_token_id][:max_len]
+
     return EncodedRow(
         input_ids=ids,
         marker_pos=[m for m in markers if m < max_len],
@@ -132,6 +140,7 @@ def encode_state(
     """One row per question; the state is tokenized once and shared. A list state
     (a conversation, newest last) is truncated from the left."""
     state_ids = tok.encode(serialize_state(state).replace(tok.mask_token, " "))
+
     rows = []
     for qid, q in questions.items():
         row = build_sequence(
@@ -144,4 +153,5 @@ def encode_state(
                 "the question; lower head_max_len, raise max_len, or use fewer options"
             )
         rows.append(row)
+
     return rows

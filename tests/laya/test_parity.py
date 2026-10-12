@@ -48,6 +48,7 @@ def cpu_fp32(
     request: pytest.FixtureRequest,
 ) -> Iterator[tuple[LayaModel, dict[str, Any]]]:
     path = checkpoint_dir(request.param)
+
     # Load inside the context but yield outside it: a module-scoped fixture that yields
     # inside `default_device` pins every later test in the module to the CPU.
     with jax.default_device(jax.devices("cpu")[0]):
@@ -57,6 +58,7 @@ def cpu_fp32(
 
 def test_fp32_logits(cpu_fp32: tuple[LayaModel, dict[str, Any]]) -> None:
     model, fixture = cpu_fp32
+
     with jax.default_device(jax.devices("cpu")[0]):
         for case in fixture["cases"]:
             out = _run(model, case)
@@ -67,6 +69,7 @@ def test_fp32_logits(cpu_fp32: tuple[LayaModel, dict[str, Any]]) -> None:
                     atol=1e-3,
                     err_msg=case["name"],
                 )
+
             # act logits run to ~4e3; compare relatively
             np.testing.assert_allclose(
                 out.act_logits,
@@ -80,6 +83,7 @@ def test_fp32_logits(cpu_fp32: tuple[LayaModel, dict[str, Any]]) -> None:
 def test_fp32_responses(cpu_fp32: tuple[LayaModel, dict[str, Any]]) -> None:
     model, fixture = cpu_fp32
     decider = Decider(model)
+
     with jax.default_device(jax.devices("cpu")[0]):
         for case in fixture["cases"]:
             _close(
@@ -95,8 +99,10 @@ def test_fp32_responses(cpu_fp32: tuple[LayaModel, dict[str, Any]]) -> None:
 def test_bf16_tpu(model_name: str, impl: str) -> None:
     model = LayaModel(checkpoint_dir(model_name), jnp.bfloat16, impl)
     assert next(iter(model.params.values())).devices().pop().platform == "tpu"
+
     for case in laya_fixture(model_name)["cases"]:
         out = _run(model, case)
+
         for i, want in enumerate(case["option_logits"]):
             got = out.option_logits[i, : len(want)].astype(np.float64)
             ref = np.asarray(want, np.float64)
@@ -104,6 +110,7 @@ def test_bf16_tpu(model_name: str, impl: str) -> None:
                 case["name"]
             )
             assert got.argmax() == ref.argmax(), case["name"]
+
         act = np.asarray(case["act_logits"], np.float64)
         for i in range(len(act)):
             diff = np.abs(

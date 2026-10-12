@@ -45,6 +45,7 @@ def decision_heads(
     """[B, S, D] encoder states -> (option logits [B, K], act logits [B, n_act])."""
     batch, seq, d = x.shape
     x = x + p["type_emb.weight"][qtype][:, None, :]
+
     for i in range(head_layers):
         k = f"head.layers.{i}"
         y = nn.linear(
@@ -56,8 +57,10 @@ def decision_heads(
             z.reshape(batch, seq, d // HEAD_DIM, HEAD_DIM)
             for z in jnp.split(y.astype(dtype), 3, -1)
         )
+
         att = ops.attention(q, kk, v, attention_mask, 0, impl)
         x = x + _linear(p, f"{k}.self_attn.out_proj", att.reshape(batch, seq, d))
+
         x = x + _linear(
             p,
             f"{k}.linear2",
@@ -75,6 +78,7 @@ def decision_heads(
     probs = jax.nn.softmax(logits, -1)
     count = jnp.maximum(marker_mask.sum(-1), 2)
     ent = -(probs * jnp.log(jnp.maximum(probs, ENTROPY_EPS))).sum(-1) / jnp.log(count)
+
     if probs.shape[-1] == 1:
         top = jnp.concatenate([jnp.zeros_like(probs), probs], axis=-1)
     else:
@@ -86,4 +90,5 @@ def decision_heads(
         _linear(p, "act_head.0", jnp.concatenate([x[:, 0], feats], -1)),
         approximate=False,
     )
+
     return logits, _linear(p, "act_head.2", hidden)

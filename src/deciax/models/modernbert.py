@@ -39,6 +39,7 @@ class ModernBertConfig:
             else "sliding_attention"
             for i in range(n)
         ]
+
         theta = dict(DEFAULT_THETA)
         legacy = {
             "full_attention": "global_rope_theta",
@@ -50,6 +51,7 @@ class ModernBertConfig:
                 theta[layer_type] = float(rope[layer_type]["rope_theta"])
             elif config.get(key) is not None:
                 theta[layer_type] = float(config[key])
+
         return cls(
             hidden_size=config["hidden_size"],
             num_attention_heads=config["num_attention_heads"],
@@ -81,8 +83,10 @@ def encode(
     batch, seq = input_ids.shape
     heads, dh = cfg.num_attention_heads, cfg.head_dim
     inv_freq = {t: nn.rope_inv_freq(dh, theta) for t, theta in cfg.rope_theta}
+
     x = p["encoder.embeddings.tok_embeddings.weight"][input_ids].astype(jnp.float32)
     x = _norm(p, "encoder.embeddings.norm", x, cfg.norm_eps)
+
     for i, layer_type in enumerate(cfg.layer_types):
         k = f"encoder.layers.{i}"
         y = (
@@ -95,14 +99,17 @@ def encode(
             .astype(dtype)
             .reshape(batch, seq, 3, heads, dh)
         )
+
         q = nn.apply_rope(qkv[:, :, 0], inv_freq[layer_type])
         kk = nn.apply_rope(qkv[:, :, 1], inv_freq[layer_type])
         window = cfg.window if layer_type == "sliding_attention" else 0
         att = ops.attention(q, kk, qkv[:, :, 2], attention_mask, window, impl)
         x = x + _linear(p, f"{k}.attn.Wo", att.reshape(batch, seq, -1))
+
         h = _linear(
             p, f"{k}.mlp.Wi", _norm(p, f"{k}.mlp_norm", x, cfg.norm_eps)
         ).astype(dtype)
         a, b = jnp.split(h, 2, -1)
         x = x + _linear(p, f"{k}.mlp.Wo", jax.nn.gelu(a, approximate=False) * b)
+
     return _norm(p, "encoder.final_norm", x, cfg.norm_eps)

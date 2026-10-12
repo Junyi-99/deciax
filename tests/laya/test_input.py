@@ -15,6 +15,7 @@ MODELS = ["laya", "laya-multilingual"]
 def test_sequences_match_reference(model: str) -> None:
     path = checkpoint_dir(model)
     tok, cfg = LayaTokenizer(path / "tokenizer"), LayaConfig.from_dir(path)
+
     for case in laya_fixture(model)["cases"]:
         rows = encode_state(
             tok,
@@ -23,6 +24,7 @@ def test_sequences_match_reference(model: str) -> None:
             cfg.max_len,
             cfg.head_max_len,
         )
+
         assert [r.input_ids for r in rows] == [r["input_ids"] for r in case["rows"]], (
             case["name"]
         )

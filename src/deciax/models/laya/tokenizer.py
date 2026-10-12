@@ -16,6 +16,7 @@ class LayaTokenizer:
         self._tok = Tokenizer.from_file(str(tokenizer_dir / "tokenizer.json"))
         self._tok.no_truncation()
         self._tok.no_padding()
+
         cfg = json.loads((tokenizer_dir / "tokenizer_config.json").read_text())
         self.mask_token = _token(cfg["mask_token"])
         self.mask_token_id = self._id(self.mask_token)

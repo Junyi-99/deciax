@@ -23,10 +23,13 @@ def server() -> Iterator[tuple[str, Decider]]:
     path = checkpoint_dir("laya")
     with jax.default_device(jax.devices("cpu")[0]):
         decider = Decider(LayaModel(path, jnp.float32, "jax"))
+
     httpd = make_server(Service({"laya": decider}, "laya"), port=0)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
+
     yield f"http://127.0.0.1:{httpd.server_address[1]}", decider
+
     httpd.shutdown()
     httpd.server_close()
 
@@ -36,6 +39,7 @@ def call(url: str, body: Any = None) -> tuple[int, Any, dict[str, str]]:
     req = urllib.request.Request(
         url, data=data, headers={"Content-Type": "application/json"}
     )
+
     try:
         with urllib.request.urlopen(req, timeout=120) as r:
             return r.status, json.loads(r.read()), dict(r.headers)
@@ -46,12 +50,14 @@ def call(url: str, body: Any = None) -> tuple[int, Any, dict[str, str]]:
 def test_systemone_matches_decider(server: tuple[str, Decider]) -> None:
     url, decider = server
     case = laya_fixture("laya")["cases"][0]
+
     with jax.default_device(jax.devices("cpu")[0]):
         status, got, headers = call(
             url + "/v1/systemone",
             {"state": case["state"], "questions": case["questions"]},
         )
         want = add_jev_confidence(decider.decide(case["state"], case["questions"]))
+
     assert status == 200
     assert got == json.loads(json.dumps(want))
     assert float(headers["X-Inference-Time-Ms"]) > 0
@@ -60,12 +66,14 @@ def test_systemone_matches_decider(server: tuple[str, Decider]) -> None:
 def test_batch_and_health(server: tuple[str, Decider]) -> None:
     url, _ = server
     case = laya_fixture("laya")["cases"][0]
+
     with jax.default_device(jax.devices("cpu")[0]):
         status, got, _ = call(
             url + "/v1/systemone/batch",
             {"states": [case["state"], "hello"], "questions": case["questions"]},
         )
     assert status == 200 and len(got["results"]) == 2
+
     status, health, _ = call(url + "/health")
     assert status == 200 and health["loaded"] == ["laya"]
 

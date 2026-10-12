@@ -42,10 +42,12 @@ class FakeDecider:
     def decide(self, state: Any, questions: Any, **kw: Any) -> dict[str, Any]:
         self.calls.append({"state": state, **kw})
         self.release.wait(5)
+
         if state == "bad":
             raise ValueError("question 'x': bad")
         if state == "boom":
             raise RuntimeError("secret /path/to/weights")
+
         return self._result()
 
     def decide_batch(
@@ -168,16 +170,19 @@ def test_batch() -> None:
     r = post(
         service, {"states": ["a", "b"], "questions": QUESTIONS}, "/v1/systemone/batch"
     )
+
     assert r.status == 200
     assert len(r.payload["results"]) == 2
     assert r.payload["total_usage"] == {"input_tokens": 14, "output_tokens": 0}
     assert "x_jev_confidence" in r.payload["results"][0]["answers"]["c"]
+
     bad = post(
         service,
         {"states": ["a"], "questions": QUESTIONS, "batch_size": 2},
         "/v1/systemone/batch",
     )
     assert bad.status == 422
+
     assert (
         post(
             service, {"states": [], "questions": QUESTIONS}, "/v1/systemone/batch"
@@ -189,10 +194,12 @@ def test_batch() -> None:
 def test_auth_and_health() -> None:
     service, _ = make(api_key="sekrit")
     assert post(service, {"state": "s", "questions": QUESTIONS}).status == 401
+
     ok = post(
         service, {"state": "s", "questions": QUESTIONS}, authorization="Bearer sekrit"
     )
     assert ok.status == 200
+
     assert service.handle("GET", "/health", {}, b"").payload == {"status": "ok"}
     full = service.handle(
         "GET", "/health", {"authorization": "Bearer sekrit"}, b""
@@ -214,13 +221,16 @@ def test_busy_returns_503() -> None:
     service, deciders = make(max_concurrent=1)
     decider = deciders["laya-multilingual"]
     decider.release.clear()
+
     first = threading.Thread(
         target=post, args=(service, {"state": "s", "questions": QUESTIONS})
     )
     first.start()
     while not decider.calls:
         pass
+
     r = post(service, {"state": "s", "questions": QUESTIONS})
     decider.release.set()
     first.join()
+
     assert r.status == 503 and r.headers["Retry-After"] == "1"

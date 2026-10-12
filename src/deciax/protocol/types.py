@@ -81,17 +81,22 @@ def resolve_noul_labels(labels: Any = None) -> tuple[str, str]:
     """(false_label, true_label), validated."""
     if labels is None:
         labels = DEFAULT_NOUL_LABELS
+
     message = (
         "noul labels must map exactly 'false' and 'true' to distinct non-empty strings"
     )
+
     if not isinstance(labels, dict) or set(labels) != {"false", "true"}:
         raise ValueError(message)
+
     false_label, true_label = labels["false"], labels["true"]
     if not isinstance(false_label, str) or not isinstance(true_label, str):
         raise ValueError(message)
+
     false_label, true_label = false_label.strip(), true_label.strip()
     if not false_label or not true_label or false_label == true_label:
         raise ValueError(message)
+
     return false_label, true_label
 
 
@@ -116,6 +121,7 @@ def _check_choice_labels(qid: Any, crit: dict[Any, Any] | list[Any]) -> None:
                 f"rendered as option text and used as the answer key, so it must be a scalar "
                 f"(a string, number or bool), got {label!r}"
             )
+
     if isinstance(crit, list):
         seen: dict[Any, int] = {}
         for i, label in enumerate(crit):
@@ -133,6 +139,7 @@ def _check(qid: Any, raw: Any) -> None:
         raise ValueError("question id must not be None")
     if not isinstance(qid, (str, int)) or (isinstance(qid, str) and not qid.strip()):
         raise ValueError(f"question id must be a non-empty string, got {qid!r}")
+
     if not isinstance(raw, dict):
         raise ValueError(
             f"question {qid!r}: definition must be a dict, got {type(raw).__name__}"
@@ -142,6 +149,7 @@ def _check(qid: Any, raw: Any) -> None:
         raise ValueError(
             f"question {qid!r}: unknown type {t!r}; use one of {sorted(QTYPES)}"
         )
+
     if "instructions" not in raw:
         raise ValueError(
             f"question {qid!r}: no 'instructions'; add the text the model should answer"
@@ -158,6 +166,7 @@ def _check(qid: Any, raw: Any) -> None:
             f"question {qid!r}: 'instructions' must be a string, dict, or list, "
             f"got {type(ins).__name__}"
         )
+
     crit = raw.get("criteria")
     if t == "choice":
         if not isinstance(crit, (dict, list)):
@@ -196,6 +205,7 @@ def _check(qid: Any, raw: Any) -> None:
                 f"question {qid!r}: a noul question takes 'criteria' keyed only "
                 f"'true'/'false', got {sorted(keys)}; use 'labels' to reword the answer"
             )
+
     if "option_order" in raw:
         order = raw["option_order"]
         n = _option_count(raw)
@@ -212,6 +222,7 @@ def _check(qid: Any, raw: Any) -> None:
             raise ValueError(
                 f"question {qid!r}: 'option_order' must be a permutation of range({n}), got {order!r}"
             )
+
     if "labels" in raw:
         if t != "noul":
             raise ValueError(
@@ -226,15 +237,18 @@ def _check(qid: Any, raw: Any) -> None:
 def parse_question(qid: Any, raw: Any) -> Question:
     """Validate and normalise one wire-format question."""
     _check(qid, raw)
+
     t = raw["type"]
     crit = raw.get("criteria")
     if t == "choice" and isinstance(crit, list):
         crit = {c: None for c in crit}
     elif t == "noul" and isinstance(crit, dict):
         crit = {str(k).lower(): v for k, v in crit.items()}
+
     ins = raw["instructions"]
     if not isinstance(ins, str):
         ins = json.dumps(ins, ensure_ascii=False)
+
     order = raw.get("option_order")
     return Question(
         type=t,

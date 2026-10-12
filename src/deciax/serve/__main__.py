@@ -43,13 +43,16 @@ def main() -> None:
     )
     parser.add_argument("--log-level", default=env("DECIAX_LOG_LEVEL", "info"))
     args = parser.parse_args()
+
     logging.basicConfig(
         level=args.log_level.upper(),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+
     models = args.models or [
         m.strip() for m in env("DECIAX_MODELS", "laya").split(",") if m.strip()
     ]
+
     serve(
         args.host,
         args.port,

@@ -21,12 +21,15 @@ def clamp_temperature(t: object, lo: float = TEMP_MIN, hi: float = TEMP_MAX) -> 
     """`t` confined to [lo, hi]; 1.0 for anything that is not a finite number."""
     if isinstance(t, bool):
         return 1.0
+
     try:
         value = float(t)  # type: ignore[arg-type]
     except TypeError, ValueError:
         return 1.0
+
     if not math.isfinite(value):
         return 1.0
+
     return min(hi, max(lo, value))
 
 

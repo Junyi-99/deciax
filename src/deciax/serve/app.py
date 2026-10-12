@@ -111,6 +111,7 @@ class Service:
     ) -> None:
         if default_model not in deciders:
             raise ValueError(f"default model {default_model!r} is not loaded")
+
         self.deciders = dict(deciders)
         self.default_model = default_model
         self.jev_strict = jev_strict
@@ -127,20 +128,24 @@ class Service:
             "/v1/systemone": ("POST", self._systemone),
             "/v1/systemone/batch": ("POST", self._batch),
         }
+
         authorization = headers.get("authorization")
         if path == "/health":
             if method != "GET":
                 return _error(405, "Method Not Allowed")
             return Response(200, self._health(authorization))
+
         if path not in routes:
             return _error(404, "Not Found")
         allowed, handler = routes[path]
         if method != allowed:
             return _error(405, "Method Not Allowed")
+
         if not self.authorized(authorization):
             return _error(401, "invalid or missing bearer token")
         if not self._admission.acquire(blocking=False):
             return _error(503, "server busy, try again later", {"Retry-After": "1"})
+
         try:
             return handler(body)
         except RequestError as e:
@@ -176,14 +181,17 @@ class Service:
             raise RequestError(
                 400, "request body must be an object with a 'questions' field"
             )
+
         state, questions = body.get("state"), body["questions"]
         check_request_limits(state, questions)
         _refuse_controls(body, UNSUPPORTED)
         if has_lone_surrogate(body):
             raise RequestError(400, LONE_SURROGATE_DETAIL)
+
         decider = self.deciders[self.resolve_model(body.get("model"))]
         budgets = _budgets(body)
         result, ms = self._infer(lambda: decider.decide(state, questions, **budgets))
+
         return Response(200, self._finish(result), _timing(ms))
 
     def _batch(self, raw: bytes) -> Response:
@@ -197,16 +205,19 @@ class Service:
                 400,
                 "request body must be an object with 'states' and 'questions' fields",
             )
+
         states, questions = body["states"], body["questions"]
         check_batch_limits(states, questions)
         _refuse_controls(body, UNSUPPORTED + UNSUPPORTED_BATCH)
         if has_lone_surrogate(body):
             raise RequestError(400, LONE_SURROGATE_DETAIL)
+
         decider = self.deciders[self.resolve_model(body.get("model"))]
         budgets = _budgets(body)
         results, ms = self._infer(
             lambda: decider.decide_batch(states, questions, **budgets)
         )
+
         payload = {
             "results": [self._finish(r) for r in results],
             "total_usage": {
@@ -228,14 +239,17 @@ class Service:
         """
         if not model:
             return self.default_model
+
         text = str(model).strip()
         key = text.lower()
         published = {
             c.repo.lower(): name for name, c in MODELS.items() if c.repo != BUNDLE_REPO
         }
         name = published.get(key) or ALIASES.get(key)
+
         if name is None and key in UNAVAILABLE:
             raise RequestError(422, f"model {text!r} is not available in deciax")
+
         if name is None:
             if key == BUNDLE_REPO:
                 return self.default_model
@@ -246,6 +260,7 @@ class Service:
                     "or omit model to let the server choose",
                 )
             return self.default_model
+
         if name not in self.deciders:
             raise RequestError(
                 422,
@@ -264,6 +279,7 @@ class Service:
         except Exception:
             log.exception("inference failed")
             raise RequestError(500, "inference failed") from None
+
         return result, (time.perf_counter() - t0) * 1000.0
 
     def _finish(self, result: dict[str, Any]) -> dict[str, Any]:
@@ -290,6 +306,7 @@ def _refuse_controls(body: Mapping[str, Any], unsupported: tuple[str, ...]) -> N
             422,
             f"{', '.join(refused)} cannot be set from a request; hooks belong to the server",
         )
+
     sent = [k for k in unsupported if body.get(k) is not None]
     if sent:
         raise RequestError(422, f"{', '.join(sent)} is not supported by deciax")
@@ -301,6 +318,7 @@ def _budgets(body: Mapping[str, Any]) -> dict[str, int]:
         value = body.get(key)
         if value is None:
             continue
+
         if isinstance(value, bool) or not isinstance(value, int):
             raise RequestError(422, f"{key} must be an integer")
         if value <= 0:
@@ -309,7 +327,9 @@ def _budgets(body: Mapping[str, Any]) -> dict[str, int]:
             raise RequestError(
                 422, f"{key} exceeds the server cap ({value} > {MAX_TOKEN_BUDGET})"
             )
+
         budgets[key] = value
+
     return budgets
 
 
@@ -328,6 +348,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _respond(self, response: Response) -> None:
         data = json.dumps(response.payload, ensure_ascii=False).encode("utf-8")
+
         self.send_response(response.status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
@@ -343,15 +364,18 @@ class _Handler(BaseHTTPRequestHandler):
             if length is None:
                 self.close_connection = True
                 return self._respond(_error(411, "Content-Length required"))
+
             try:
                 n = int(length)
             except ValueError:
                 self.close_connection = True
                 return self._respond(_error(400, "invalid Content-Length"))
+
             if n > MAX_BODY_BYTES:
                 self.close_connection = True
                 return self._respond(_error(413, "request body too large"))
             body = self.rfile.read(n)
+
         headers = {k.lower(): v for k, v in self.headers.items()}
         self._respond(
             self.server.service.handle(self.command, self.path, headers, body)
@@ -405,6 +429,7 @@ def serve(
         deciders[name] = load(name, dtype=dtype, impl=impl)
         if warmup:
             deciders[name].decide(WARMUP_STATE, WARMUP_QUESTIONS)
+
     service = Service(
         deciders,
         default_model or models[0],
@@ -413,8 +438,10 @@ def serve(
         jev_strict=jev_strict,
         device=jax.default_backend(),
     )
+
     server = make_server(service, host, port)
     log.info("serving %s on http://%s:%d", sorted(deciders), *server.server_address[:2])
+
     try:
         server.serve_forever()
     finally:

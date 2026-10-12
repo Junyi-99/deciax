@@ -54,10 +54,12 @@ class Decider:
                 {"model": "laya-rl-agent", "answers": {}, "usage": dict(empty)}
                 for _ in states
             ]
+
         per_state = [
             self.model.encode(s, parsed, max_len, head_max_len) for s in states
         ]
         out = self.engine.run([r for rows in per_state for r in rows])
+
         results, n = [], len(parsed)
         for i, rows in enumerate(per_state):
             part = slice(i * n, (i + 1) * n)
@@ -68,6 +70,7 @@ class Decider:
                 out.input_tokens[part],
             )
             results.append(self.model.decode(rows, sub, parsed))
+
         return results
 
 
@@ -90,7 +93,9 @@ def load(
             allow_patterns=list(ckpt.files),
         )
     )
+
     if dtype == "auto":
         dtype = "bf16" if jax.default_backend() == "tpu" else "fp32"
     jdtype = {"bf16": jnp.bfloat16, "fp32": jnp.float32}[dtype]
+
     return Decider(LayaModel(path, jdtype, impl))

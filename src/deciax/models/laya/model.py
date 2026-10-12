@@ -31,9 +31,11 @@ class LayaModel:
         self.config = LayaConfig.from_dir(path)
         self.tokenizer = LayaTokenizer(path / "tokenizer")
         self.pad_token_id = self.tokenizer.pad_token_id
+
         self.calibration = Calibration(
             self.config.temperature, self.config.temperature_by_options
         )
+
         self.dtype = dtype
         self.params = load_params(path / "model.safetensors", dtype)
         self._forward = jax.jit(functools.partial(self._apply, impl=impl))
@@ -51,6 +53,7 @@ class LayaModel:
         h = modernbert.encode(
             params, self.config.encoder, input_ids, attention_mask, self.dtype, impl
         )
+
         return decision_heads(
             params,
             h,
@@ -102,6 +105,7 @@ class LayaModel:
             probs = softmax(output.option_logits[i, :k].astype(np.float64) / t)
             act = softmax(output.act_logits[i].astype(np.float64))
             answers[qid] = to_answer(q, probs, float(act[0]))
+
         stats = [r.state_stats for r in rows]
         dropped = max(s["state_tokens_dropped"] for s in stats)
         usage: dict[str, Any] = {
@@ -114,6 +118,7 @@ class LayaModel:
                 qid for qid, s in zip(questions, stats, strict=True) if s["truncated"]
             ],
         }
+
         collapsed = {
             qid: {
                 "total": r.option_stats["options"],
@@ -125,4 +130,5 @@ class LayaModel:
         }
         if collapsed:
             usage["options"] = collapsed
+
         return {"model": MODEL_NAME, "answers": answers, "usage": usage}

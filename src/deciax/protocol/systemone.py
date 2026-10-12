@@ -50,6 +50,7 @@ def check_request_limits(state: Any, questions: Any) -> None:
         raise RequestError(
             413, f"too many questions ({len(questions)} > {MAX_QUESTIONS})"
         )
+
     total = 0
     for qid, q in questions.items():
         if not isinstance(q, dict):
@@ -75,11 +76,13 @@ def check_request_limits(state: Any, questions: Any) -> None:
                     f"score question {qid!r} has a null level at index {crit.index(None)}; "
                     "give every level a description",
                 )
+
     if total > MAX_TOTAL_OPTIONS:
         raise RequestError(
             413,
             f"too many answer options across questions ({total} > {MAX_TOTAL_OPTIONS})",
         )
+
     length = _state_length(state)
     if length > MAX_STATE_CHARS:
         raise RequestError(413, f"state too large ({length} > {MAX_STATE_CHARS} chars)")
@@ -92,6 +95,7 @@ def check_batch_limits(states: Any, questions: Any) -> None:
         raise RequestError(
             413, f"too many states in batch ({len(states)} > {MAX_BATCH_STATES})"
         )
+
     for state in states:
         check_request_limits(state, questions)
 
@@ -109,6 +113,7 @@ def has_lone_surrogate(value: Any) -> bool:
             stack.extend(item.values())
         elif isinstance(item, (list, tuple)):
             stack.extend(item)
+
     return False
 
 
@@ -127,6 +132,7 @@ def jev_confidence(answer: Mapping[str, Any]) -> float | None:
         return None
     if any(isinstance(v, bool) for v in probabilities.values()):
         return None
+
     try:
         if kind == "score":
             p = [float(probabilities[key]) for key in sorted(probabilities, key=int)]
@@ -136,13 +142,17 @@ def jev_confidence(answer: Mapping[str, Any]) -> float | None:
         return None
     if not all(math.isfinite(v) for v in p):
         return None
+
     n = len(p)
     if n == 1:
         return 1.0
+
     total = sum(p)
     p = [v / total for v in p] if total else [1.0 / n] * n
+
     if kind == "choice":
         return (max(p) - 1.0 / n) / (1.0 - 1.0 / n)
+
     mode = max(range(n), key=p.__getitem__)
     spread = sum(v * abs(i - mode) for i, v in enumerate(p))
     center = (n - 1) / 2
@@ -158,6 +168,7 @@ def add_jev_confidence(result: Mapping[str, Any]) -> dict[str, Any]:
         answers[qid] = (
             answer if conf is None else {**answer, "x_jev_confidence": round(conf, 4)}
         )
+
     return {**result, "answers": answers}
 
 
@@ -168,10 +179,12 @@ def project_jev_strict(result: Mapping[str, Any]) -> dict[str, Any]:
         "score": ("type", "score", "confidence", "probabilities", "legend"),
         "noul": ("type", "noul"),
     }
+
     answers = {}
     for qid, answer in result["answers"].items():
         fields = keep.get(answer.get("type"))
         answers[qid] = answer if fields is None else {k: answer[k] for k in fields}
+
     usage = result.get("usage") or {}
     return {
         "model": result["model"],

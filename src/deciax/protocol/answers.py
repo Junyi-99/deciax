@@ -50,6 +50,7 @@ def to_answer(question: Question, slot_probs: Probs, act_probability: float) -> 
     p = unpermute_probs(slot_probs, question.option_order)
     action = {"act_probability": round(float(act_probability), 4)}
     ans_conf = round(answer_confidence(p, k), 4)
+
     if question.type == "choice":
         keys = list(question.criteria.keys())
         return {
@@ -62,6 +63,7 @@ def to_answer(question: Question, slot_probs: Probs, act_probability: float) -> 
             "answer_confidence": ans_conf,
             "action": {"act_probability": action["act_probability"]},
         }
+
     if question.type == "score":
         return {
             "type": "score",
@@ -74,6 +76,7 @@ def to_answer(question: Question, slot_probs: Probs, act_probability: float) -> 
             "answer_confidence": ans_conf,
             "action": {"act_probability": action["act_probability"]},
         }
+
     p_true = float(p[1])
     return {
         "type": "noul",

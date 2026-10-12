@@ -1,0 +1,25 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write  # PyPI trusted publishing
+      contents: write  # GitHub release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Check tag matches pyproject version
+        run: |
+          v=$(uv version --short)
+          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME} != pyproject $v"; exit 1; }
+      - run: uv build
+      - run: uv publish --trusted-publishing always
+      - run: gh release create "${GITHUB_REF_NAME}" dist/* --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

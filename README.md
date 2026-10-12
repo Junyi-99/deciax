@@ -2,27 +2,6 @@
 
 High-performance decision models on TPUs, powered by JAX and Pallas.
 
-## Development
-
-Install the development tools and Git hooks:
-
-```sh
-uv sync
-uv run pre-commit install
-```
-
-Run all checks manually with `uv run pre-commit run --all-files`.
-
-Run the tests and type checks:
-
-```sh
-uv run pytest            # TPU-only tests are skipped off-TPU
-uv run mypy
-```
-
-Parity fixtures come from the PyTorch reference, Laya 0.4.4 at commit `682ac67`. Install it with
-`uv sync --group reference` and run `scripts/export_reference.py`.
-
 ## Usage
 
 ```python

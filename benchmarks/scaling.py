@@ -1,6 +1,8 @@
 """Forward latency vs batch rows and sequence length, impl="jax" vs impl="pallas", on synthetic
-bucketed inputs (benchmarks/hbm_traffic.py builds them). Reports p50 ms, tokens / s and the
-share of the bf16 MXU peak the dense matmul FLOPs reach.
+bucketed inputs (benchmarks/hbm_traffic.py builds them). Reports p50 ms, tokens / s and "MFU" =
+matmul + full-attention FLOPs / time / bf16 peak; the attention term counts every layer as full
+attention, so at long sequences (where the sliding layers skip most key blocks) it overstates
+the useful work. Results: benchmarks/results/<chip>/scaling_<model>.txt.
 
   python benchmarks/scaling.py [--model laya] [--out out.json]
 """
@@ -68,7 +70,7 @@ def main() -> None:
     kind = jax.devices()[0].device_kind
     peak = peak_tflops(kind)
     heads = next(iter(models.values())).config.encoder.num_attention_heads
-    shapes = [(r, 256) for r in ROWS] + [(max(TOKENS // s, 1), s) for s in SEQS]
+    shapes = list(dict.fromkeys([(r, 256) for r in ROWS] + [(max(TOKENS // s, 1), s) for s in SEQS]))
     res = []
     print(f"{args.model} on {kind} (bf16 peak {peak:.0f} TFLOP/s)")
     print(f"{'rows':>5s} {'seq':>6s} {'tokens':>7s} | " + " | ".join(f"{impl:>7s} ms {'tok/s':>8s} {'MFU':>4s}" for impl in models) + " | speedup")

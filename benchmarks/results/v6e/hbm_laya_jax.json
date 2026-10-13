@@ -1,0 +1,386 @@
+{
+ "model": "laya",
+ "impl": "jax",
+ "rows": 64,
+ "seq": 256,
+ "device": "TPU v6 lite",
+ "p50_ms": 70.28614857699722,
+ "device_busy_ms": 69.5651715,
+ "idle_ms": 0.76998925,
+ "hbm_traffic_mb_per_call": 90522.63737469912,
+ "hbm_traffic_source": "xprof framework_op_stats measured bandwidth x self time",
+ "fused_hbm_bytes": null,
+ "hbm_avg_gb_per_s": 1287.9157445301357,
+ "hlo": {
+  "file": "/tmp/hlo_es44ao84/module_0070.jit__apply.cl_994787025.after_optimizations.txt",
+  "fusions": {
+   "kLoop": 598,
+   "kOutput": 124,
+   "kCustom": 2
+  },
+  "custom_calls": 67,
+  "lines": 18459
+ },
+ "ops": [
+  {
+   "op": "jit(_apply)/dot_general",
+   "type": "dot_general",
+   "ms": 29.84271825,
+   "hbm_gb_per_s": 860.1935381320477,
+   "hbm_mb": 25670.51339894533,
+   "tflops": 407.74053637825034,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "jit(_apply)/sub",
+   "type": "sub",
+   "ms": 16.458455875,
+   "hbm_gb_per_s": 1377.4249697611745,
+   "hbm_mb": 22670.288085937496,
+   "tflops": 0.7339451095378047,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "jit(_apply)/bshd,bthd->bhst/dot_general",
+   "type": "dot_general",
+   "ms": 7.063283125000001,
+   "hbm_gb_per_s": 1575.530496485655,
+   "hbm_mb": 11128.41796875,
+   "tflops": 37.81432430120801,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "jit(_apply)/bhst,bthd->bshd/dot_general",
+   "type": "dot_general",
+   "ms": 6.784028500000001,
+   "hbm_gb_per_s": 1386.240767561634,
+   "hbm_mb": 9404.296875,
+   "tflops": 38.65371233036536,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "jit(_apply)/convert_element_type",
+   "type": "convert_element_type",
+   "ms": 4.4541977500000005,
+   "hbm_gb_per_s": 1178.7627760538498,
+   "hbm_mb": 5250.4425048828125,
+   "tflops": 1.8391639661710126e-05,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "jit(_apply)/reduce_sum",
+   "type": "reduce_sum",
+   "ms": 1.825603125,
+   "hbm_gb_per_s": 2162.446672771576,
+   "hbm_mb": 3947.769403457641,
+   "tflops": 1.792338842540051,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "jit(_apply)/squeeze",
+   "type": "squeeze",
+   "ms": 1.2684455,
+   "hbm_gb_per_s": 2759.2829175553857,
+   "hbm_mb": 3499.9999999999995,
+   "tflops": 0.0,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "IDLE",
+   "type": "IDLE",
+   "ms": 0.76998925,
+   "hbm_gb_per_s": 0.0,
+   "hbm_mb": 0.0,
+   "tflops": 0.0,
+   "bound_by": "Unknown"
+  },
+  {
+   "op": "jit(_apply)/neg",
+   "type": "neg",
+   "ms": 0.71650375,
+   "hbm_gb_per_s": 4884.831377365436,
+   "hbm_mb": 3500.0,
+   "tflops": 1.9668929073992982,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "jit(_apply)/split",
+   "type": "split",
+   "ms": 0.44032412499999996,
+   "hbm_gb_per_s": 1703.2907293008302,
+   "hbm_mb": 749.9999999999999,
+   "tflops": 0.0,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "jit(_apply)/gather",
+   "type": "gather",
+   "ms": 0.137605,
+   "hbm_gb_per_s": 911.5335553292163,
+   "hbm_mb": 125.43157488107681,
+   "tflops": 0.00012650703099451326,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "copy-done.45",
+   "type": "Unknown",
+   "ms": 0.045521375,
+   "hbm_gb_per_s": 1372.981865151081,
+   "hbm_mb": 62.50002235174179,
+   "tflops": 0.0,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "copy-done.33",
+   "type": "Unknown",
+   "ms": 0.044613625000000004,
+   "hbm_gb_per_s": 1400.9178216686448,
+   "hbm_mb": 62.5000223517418,
+   "tflops": 0.0,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "copy-done.47",
+   "type": "Unknown",
+   "ms": 0.044527875,
+   "hbm_gb_per_s": 1403.6156531552829,
+   "hbm_mb": 62.50002235174179,
+   "tflops": 0.0,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "copy-done.43",
+   "type": "Unknown",
+   "ms": 0.043772125,
+   "hbm_gb_per_s": 1427.8498553986535,
+   "hbm_mb": 62.50002235174179,
+   "tflops": 0.0,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "copy-done.35",
+   "type": "Unknown",
+   "ms": 0.043416875,
+   "hbm_gb_per_s": 1439.5329546804505,
+   "hbm_mb": 62.500022351741784,
+   "tflops": 0.0,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "copy-done.41",
+   "type": "Unknown",
+   "ms": 0.042118499999999996,
+   "hbm_gb_per_s": 1483.9090269535188,
+   "hbm_mb": 62.50002235174178,
+   "tflops": 0.0,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "copy-done.37",
+   "type": "Unknown",
+   "ms": 0.040600875,
+   "hbm_gb_per_s": 1539.3762413184884,
+   "hbm_mb": 62.500022351741784,
+   "tflops": 0.0,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "copy-done.39",
+   "type": "Unknown",
+   "ms": 0.040060625,
+   "hbm_gb_per_s": 1560.1359777023395,
+   "hbm_mb": 62.500022351741784,
+   "tflops": 0.0,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "copy-done.31",
+   "type": "Unknown",
+   "ms": 0.039593875,
+   "hbm_gb_per_s": 1578.5275462869392,
+   "hbm_mb": 62.50002235174179,
+   "tflops": 0.0,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "copy-done.30",
+   "type": "Unknown",
+   "ms": 0.0394615,
+   "hbm_gb_per_s": 1583.8227728733523,
+   "hbm_mb": 62.500022351741784,
+   "tflops": 0.0,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "copy-done.56",
+   "type": "Unknown",
+   "ms": 0.022436875000000002,
+   "hbm_gb_per_s": 1392.7974529314706,
+   "hbm_mb": 31.25002235174179,
+   "tflops": 0.0,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "copy-done.57",
+   "type": "Unknown",
+   "ms": 0.015974750000000003,
+   "hbm_gb_per_s": 1956.2135464869116,
+   "hbm_mb": 31.250022351741798,
+   "tflops": 0.0,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "slice-done.53",
+   "type": "Unknown",
+   "ms": 0.0047350000000000005,
+   "hbm_gb_per_s": 824.9783213815818,
+   "hbm_mb": 3.9062723517417903,
+   "tflops": 0.0,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "slice-done.55",
+   "type": "Unknown",
+   "ms": 0.004190999999999999,
+   "hbm_gb_per_s": 932.0621216277239,
+   "hbm_mb": 3.9062723517417903,
+   "tflops": 0.0,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "slice-done.59",
+   "type": "Unknown",
+   "ms": 0.00404325,
+   "hbm_gb_per_s": 966.1218949463403,
+   "hbm_mb": 3.9062723517417903,
+   "tflops": 0.0,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "slice-done.61",
+   "type": "Unknown",
+   "ms": 0.0039447499999999995,
+   "hbm_gb_per_s": 990.2458588609646,
+   "hbm_mb": 3.90627235174179,
+   "tflops": 0.0,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "slice-done.57",
+   "type": "Unknown",
+   "ms": 0.0038677500000000005,
+   "hbm_gb_per_s": 1009.9598866891062,
+   "hbm_mb": 3.9062723517417908,
+   "tflops": 0.0,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "jit(_apply)/jit(take_along_axis)/gather",
+   "type": "gather",
+   "ms": 0.00362325,
+   "hbm_gb_per_s": 1080.2123492806872,
+   "hbm_mb": 3.9138793945312504,
+   "tflops": 0.0004239287932105154,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "slice-done.5",
+   "type": "Unknown",
+   "ms": 0.0035508749999999998,
+   "hbm_gb_per_s": 1100.0872606728738,
+   "hbm_mb": 3.9062723517417903,
+   "tflops": 0.0,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "slice-done.63",
+   "type": "Unknown",
+   "ms": 0.0035318750000000003,
+   "hbm_gb_per_s": 1106.0052668177075,
+   "hbm_mb": 3.9062723517417908,
+   "tflops": 0.0,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "slice-done.58",
+   "type": "Unknown",
+   "ms": 0.00349475,
+   "hbm_gb_per_s": 1117.7544464530483,
+   "hbm_mb": 3.9062723517417908,
+   "tflops": 0.0,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "slice-done.7",
+   "type": "Unknown",
+   "ms": 0.0033905000000000003,
+   "hbm_gb_per_s": 1152.1227995109248,
+   "hbm_mb": 3.9062723517417908,
+   "tflops": 0.0,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "slice-done.11",
+   "type": "Unknown",
+   "ms": 0.0033363750000000004,
+   "hbm_gb_per_s": 1170.8133383512916,
+   "hbm_mb": 3.9062723517417908,
+   "tflops": 0.0,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "slice-done.62",
+   "type": "Unknown",
+   "ms": 0.0032990000000000007,
+   "hbm_gb_per_s": 1184.0777058932376,
+   "hbm_mb": 3.9062723517417917,
+   "tflops": 0.0,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "slice-done.9",
+   "type": "Unknown",
+   "ms": 0.00314025,
+   "hbm_gb_per_s": 1243.936741260024,
+   "hbm_mb": 3.9062723517417903,
+   "tflops": 0.0,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "slice-done.13",
+   "type": "Unknown",
+   "ms": 0.0031328750000000002,
+   "hbm_gb_per_s": 1246.8650526247586,
+   "hbm_mb": 3.9062723517417908,
+   "tflops": 0.0,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "slice-done.52",
+   "type": "Unknown",
+   "ms": 0.0031315,
+   "hbm_gb_per_s": 1247.412534485643,
+   "hbm_mb": 3.906272351741791,
+   "tflops": 0.0,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "slice-done.15",
+   "type": "Unknown",
+   "ms": 0.00304675,
+   "hbm_gb_per_s": 1282.1112174421237,
+   "hbm_mb": 3.9062723517417903,
+   "tflops": 0.0,
+   "bound_by": "HBM"
+  },
+  {
+   "op": "jit(_apply)/and",
+   "type": "and",
+   "ms": 0.0029905,
+   "hbm_gb_per_s": 1331.73179913476,
+   "hbm_mb": 3.9825439453125,
+   "tflops": 1.4025427186089283,
+   "bound_by": "HBM"
+  }
+ ]
+}

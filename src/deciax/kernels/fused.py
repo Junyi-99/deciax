@@ -26,6 +26,8 @@ HEAD_DIM = 64  # rotate-half RoPE below assumes 64-wide heads (two heads per 128
 LANE = 128
 VMEM_LIMIT = 96 * 1024 * 1024
 TM = 512  # row block
+LAYER_MAX_SEQ = 512  # `layer` (one kernel per layer, whole sequences in VMEM) is used up to this sequence length
+MASK_FILL = -1e30
 F32 = jnp.float32
 
 
@@ -210,3 +212,150 @@ def pad_gated(wi: jax.Array, wo2: jax.Array) -> tuple[jax.Array, jax.Array]:
     pad = ((0, fp - fi), (0, 0))
     wi_t = jnp.concatenate([jnp.pad(a, pad), jnp.pad(b, pad)], 0).T
     return wi_t, jnp.pad(wo2, ((0, 0), (0, fp - fi))).T
+
+
+def layer(
+    x: jax.Array,
+    mask: jax.Array,
+    norm1_w: jax.Array,
+    norm1_b: jax.Array,
+    w_qkv_t: jax.Array,
+    b_qkv: jax.Array,
+    rope: Rope | None,
+    wo_t: jax.Array,
+    bo: jax.Array,
+    norm2_w: jax.Array,
+    norm2_b: jax.Array,
+    wi_t: jax.Array,
+    bi: jax.Array,
+    wo2_t: jax.Array,
+    b2: jax.Array,
+    *,
+    seq: int,
+    heads: int,
+    window: int,
+    eps: float,
+    act: str,
+    normalize: bool = True,
+) -> jax.Array:
+    """One transformer layer in one kernel, for seq <= LAYER_MAX_SEQ: x [R, D] fp32 -> x' [R, D] fp32.
+
+    A grid step holds tm / seq whole sequences, so the layer's intermediates never leave VMEM:
+    LayerNorm -> @ w_qkv_t (+ b_qkv) -> RoPE on the q / k heads -> per sequence and head a single-pass
+    softmax attention with the key mask and sliding window built in-kernel (scores [S, S] fit, no online
+    rescaling) -> @ wo_t + bo + x -> LayerNorm -> @ wi_t + bi -> gated GELU | ReLU -> @ wo2_t + b2 + y.
+    HBM sees x once in, x' once out and the weights once per kernel.
+    """
+    rows, d = x.shape
+    batch = rows // seq
+    n, f, fp = w_qkv_t.shape[1], wi_t.shape[1], wo2_t.shape[0]
+    assert n == 3 * d and heads * HEAD_DIM == d and seq <= LAYER_MAX_SEQ, (n, d, heads, seq)
+    assert act in ("gated_gelu", "relu") and (f == 2 * fp if act == "gated_gelu" else f == fp), (act, f, fp)
+    nseq = min(batch, max(1, TM // seq))
+    assert batch % nseq == 0, (batch, nseq)
+    tm = nseq * seq
+    scale = HEAD_DIM**-0.5
+    cos, sin = (rope.cos, rope.sin) if rope is not None else (jnp.zeros((seq, LANE), F32),) * 2
+
+    def kernel(
+        x_ref,
+        m_ref,
+        n1w_ref,
+        n1b_ref,
+        wqkv_ref,
+        bqkv_ref,
+        cos_ref,
+        sin_ref,
+        wo_ref,
+        bo_ref,
+        n2w_ref,
+        n2b_ref,
+        wi_ref,
+        bi_ref,
+        wo2_ref,
+        b2_ref,
+        o_ref,
+        qkv_sc,
+        att_sc,
+    ):
+        xv = x_ref[...]
+        xn = (_layer_norm(xv, n1w_ref[...], n1b_ref[...], eps) if normalize else xv).astype(wqkv_ref.dtype)
+        for j in range(3):  # q | k | v chunks of the projection, RoPE on q and k
+            cols = slice(j * d, (j + 1) * d)
+            y = (jnp.dot(xn, wqkv_ref[:, cols], preferred_element_type=F32) + bqkv_ref[:, cols].astype(F32)).astype(qkv_sc.dtype)
+            if rope is not None and j < 2:
+                y = _rope(y, jnp.tile(cos_ref[...], (nseq, 1)), jnp.tile(sin_ref[...], (nseq, 1)))
+            qkv_sc[:, cols] = y
+
+        for s_ in range(nseq):  # attention, one sequence at a time: scores [keys, queries] per head
+            rows_ = slice(s_ * seq, (s_ + 1) * seq)
+            allowed = jnp.transpose(m_ref[s_] > 0)  # [S, 1]: key validity along the rows
+            if window:
+                kpos = jax.lax.broadcasted_iota(jnp.int32, (seq, seq), 0)
+                qpos = jax.lax.broadcasted_iota(jnp.int32, (seq, seq), 1)
+                allowed = allowed & (jnp.abs(qpos - kpos) <= window)
+            bias = jnp.broadcast_to(jnp.where(allowed, 0.0, MASK_FILL).astype(F32), (seq, seq))
+            for h in range(heads):
+                cols = slice(h * HEAD_DIM, (h + 1) * HEAD_DIM)
+                q = qkv_sc[rows_, cols]
+                k = qkv_sc[rows_, d + h * HEAD_DIM : d + (h + 1) * HEAD_DIM]
+                v = qkv_sc[rows_, 2 * d + h * HEAD_DIM : 2 * d + (h + 1) * HEAD_DIM]
+                st = jax.lax.dot_general(k, q * scale, (((1,), (1,)), ((), ())), preferred_element_type=F32) + bias
+                p = jnp.exp(st - st.max(0, keepdims=True))
+                l = p.sum(0, keepdims=True)
+                ot = jax.lax.dot_general(v, p.astype(v.dtype), (((0,), (0,)), ((), ())), preferred_element_type=F32)  # [64, S]
+                att_sc[rows_, cols] = jnp.transpose(ot / l).astype(att_sc.dtype)
+
+        y = jnp.dot(att_sc[...], wo_ref[...], preferred_element_type=F32) + bo_ref[...].astype(F32) + xv
+        z = _layer_norm(y, n2w_ref[...], n2b_ref[...], eps).astype(wi_ref.dtype)
+        h = jnp.dot(z, wi_ref[...], preferred_element_type=F32) + bi_ref[...].astype(F32)
+        g = _gelu(h[:, :fp]) * h[:, fp:] if act == "gated_gelu" else jnp.maximum(h, 0.0)
+        o_ref[...] = jnp.dot(g.astype(wo2_ref.dtype), wo2_ref[...], preferred_element_type=F32) + b2_ref[...].astype(F32) + y
+
+    full = lambda shape: pl.BlockSpec(shape, lambda i: (0,) * len(shape))
+    return pl.pallas_call(  # type: ignore[no-any-return]
+        kernel,
+        out_shape=jax.ShapeDtypeStruct((rows, d), F32),
+        grid_spec=pl.GridSpec(
+            grid=(rows // tm,),
+            in_specs=[
+                pl.BlockSpec((tm, d), lambda i: (i, 0)),
+                pl.BlockSpec((nseq, 1, seq), lambda i: (i, 0, 0)),
+                full((1, d)),
+                full((1, d)),
+                full((d, n)),
+                full((1, n)),
+                full((seq, LANE)),
+                full((seq, LANE)),
+                full((d, d)),
+                full((1, d)),
+                full((1, d)),
+                full((1, d)),
+                full((d, f)),
+                full((1, f)),
+                full((fp, d)),
+                full((1, d)),
+            ],
+            out_specs=pl.BlockSpec((tm, d), lambda i: (i, 0)),
+            scratch_shapes=[pltpu.VMEM((tm, n), w_qkv_t.dtype), pltpu.VMEM((tm, d), w_qkv_t.dtype)],
+        ),
+        compiler_params=pltpu.CompilerParams(dimension_semantics=("parallel",), vmem_limit_bytes=VMEM_LIMIT),
+        name=f"layer_{act}_w{window}",
+    )(
+        x,
+        mask.reshape(batch, 1, seq).astype(jnp.int32),
+        norm1_w.reshape(1, d),
+        norm1_b.reshape(1, d),
+        w_qkv_t,
+        b_qkv.reshape(1, n),
+        cos,
+        sin,
+        wo_t,
+        bo.reshape(1, d),
+        norm2_w.reshape(1, d),
+        norm2_b.reshape(1, d),
+        wi_t,
+        bi.reshape(1, f),
+        wo2_t,
+        b2.reshape(1, d),
+    )

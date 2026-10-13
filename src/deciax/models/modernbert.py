@@ -166,6 +166,31 @@ def _layer_fused(
     from deciax.kernels.attention import pallas
 
     d, heads = cfg.hidden_size, cfg.num_attention_heads
+    window = cfg.window if layer_type == "sliding_attention" else 0
+    if seq <= fused.LAYER_MAX_SEQ:  # whole sequences fit in VMEM: one kernel for the layer
+        return fused.layer(
+            x,
+            attention_mask,
+            fp[f"{k}.attn_norm"],
+            zeros,
+            fp[f"{k}.WqkvT"],
+            jnp.zeros((3 * d,), jnp.float32),
+            rope,
+            fp[f"{k}.WoT"],
+            zeros,
+            fp[f"{k}.mlp_norm"],
+            zeros,
+            fp[f"{k}.WiT"],
+            f_zeros,
+            fp[f"{k}.Wo2T"],
+            zeros,
+            seq=seq,
+            heads=heads,
+            window=window,
+            eps=cfg.norm_eps,
+            act="gated_gelu",
+            normalize=f"{k}.attn_norm.weight" in p,
+        )
     qkv = fused.norm_linear(
         x,
         fp[f"{k}.attn_norm"],
@@ -178,7 +203,6 @@ def _layer_fused(
         rope_blocks=2,
         tn=d,
     )
-    window = cfg.window if layer_type == "sliding_attention" else 0
     att = pallas.flash_attention(qkv.reshape(batch, seq, 3 * d), attention_mask, heads=heads, window=window)
     return fused.out_mlp(
         att.reshape(batch * seq, d),

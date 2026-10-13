@@ -141,6 +141,29 @@ def _head_layer_fused(
     """One head layer, [B * S, D] fp32 in and out (nn.TransformerEncoderLayer, pre-norm, ReLU FFN)."""
     from deciax.kernels.attention import pallas
 
+    if seq <= fused.LAYER_MAX_SEQ:  # whole sequences fit in VMEM: one kernel for the layer
+        return fused.layer(
+            x,
+            attention_mask,
+            p[f"{k}.norm1.weight"],
+            p[f"{k}.norm1.bias"],
+            fp[f"{k}.in_projT"],
+            p[f"{k}.self_attn.in_proj_bias"],
+            None,
+            fp[f"{k}.out_projT"],
+            p[f"{k}.self_attn.out_proj.bias"],
+            p[f"{k}.norm2.weight"],
+            p[f"{k}.norm2.bias"],
+            fp[f"{k}.linear1T"],
+            p[f"{k}.linear1.bias"],
+            fp[f"{k}.linear2T"],
+            p[f"{k}.linear2.bias"],
+            seq=seq,
+            heads=d // HEAD_DIM,
+            window=0,
+            eps=HEAD_NORM_EPS,
+            act="relu",
+        )
     qkv = fused.norm_linear(x, p[f"{k}.norm1.weight"], p[f"{k}.norm1.bias"], HEAD_NORM_EPS, fp[f"{k}.in_projT"], p[f"{k}.self_attn.in_proj_bias"], tn=d)
     att = pallas.flash_attention(qkv.reshape(batch, seq, 3 * d), attention_mask, heads=d // HEAD_DIM)
     return fused.out_mlp(

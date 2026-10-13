@@ -17,6 +17,7 @@ import jax
 import jax.numpy as jnp
 
 from deciax import nn, ops
+from deciax.kernels import fused
 
 HEAD_DIM = 64
 HEAD_NORM_EPS = 1e-5
@@ -66,6 +67,10 @@ def decision_heads(
             jax.nn.relu(_linear(p, f"{k}.linear1", _norm(p, f"{k}.norm2", x))),
         )
 
+    return _scorer(p, x, marker_mask, marker_pos)
+
+
+def _scorer(p: dict[str, jax.Array], x: jax.Array, marker_mask: jax.Array, marker_pos: jax.Array) -> tuple[jax.Array, jax.Array]:
     m = jnp.take_along_axis(x, jnp.maximum(marker_pos, 0)[..., None], axis=1)
     hidden = jax.nn.gelu(_linear(p, "scorer.1", _norm(p, "scorer.0", m)), approximate=False)
     logits = jnp.where(marker_mask, _linear(p, "scorer.3", hidden)[..., 0], OPTION_MASK_FILL)
@@ -85,3 +90,70 @@ def decision_heads(
     )
 
     return logits, _linear(p, "act_head.2", hidden)
+
+
+# ---------------------------------------------------------------- fused TPU path (impl="pallas")
+
+
+def prepare_fused(p: dict[str, jax.Array], head_layers: int) -> dict[str, jax.Array]:
+    out = {}
+    for i in range(head_layers):
+        k = f"head.layers.{i}"
+        out[f"{k}.in_projT"] = p[f"{k}.self_attn.in_proj_weight"].T
+        out[f"{k}.out_projT"] = p[f"{k}.self_attn.out_proj.weight"].T
+        out[f"{k}.linear1T"] = p[f"{k}.linear1.weight"].T
+        out[f"{k}.linear2T"] = p[f"{k}.linear2.weight"].T
+    return out
+
+
+def decision_heads_fused(
+    p: dict[str, jax.Array],
+    fp: dict[str, jax.Array],
+    x: jax.Array,
+    attention_mask: jax.Array,
+    marker_pos: jax.Array,
+    marker_mask: jax.Array,
+    qtype: jax.Array,
+    head_layers: int,
+) -> tuple[jax.Array, jax.Array]:
+    """`decision_heads` with the fused kernels: full attention, ReLU MLP, biases everywhere."""
+
+    batch, seq, d = x.shape
+    x = (x + p["type_emb.weight"][qtype][:, None, :]).reshape(batch * seq, d)
+    for i in range(head_layers):
+        k = f"head.layers.{i}"
+        with jax.named_scope(f"head{i}"):
+            x = _head_layer_fused(p, fp, k, x, attention_mask, batch, seq, d)
+    with jax.named_scope("scorer"):
+        return _scorer(p, x.reshape(batch, seq, d), marker_mask, marker_pos)
+
+
+def _head_layer_fused(
+    p: dict[str, jax.Array],
+    fp: dict[str, jax.Array],
+    k: str,
+    x: jax.Array,
+    attention_mask: jax.Array,
+    batch: int,
+    seq: int,
+    d: int,
+) -> jax.Array:
+    """One head layer, [B * S, D] fp32 in and out (nn.TransformerEncoderLayer, pre-norm, ReLU FFN)."""
+    from deciax.kernels.attention import pallas
+
+    qkv = fused.norm_linear(x, p[f"{k}.norm1.weight"], p[f"{k}.norm1.bias"], HEAD_NORM_EPS, fp[f"{k}.in_projT"], p[f"{k}.self_attn.in_proj_bias"], tn=d)
+    att = pallas.flash_attention(qkv.reshape(batch, seq, 3 * d), attention_mask, heads=d // HEAD_DIM)
+    return fused.out_mlp(
+        att.reshape(batch * seq, d),
+        x,
+        fp[f"{k}.out_projT"],
+        p[f"{k}.self_attn.out_proj.bias"],
+        p[f"{k}.norm2.weight"],
+        p[f"{k}.norm2.bias"],
+        HEAD_NORM_EPS,
+        fp[f"{k}.linear1T"],
+        p[f"{k}.linear1.bias"],
+        fp[f"{k}.linear2T"],
+        p[f"{k}.linear2.bias"],
+        act="relu",
+    )

@@ -29,6 +29,7 @@ from deciax.protocol.systemone import (
     LONE_SURROGATE_DETAIL,
     MAX_BODY_BYTES,
     RequestError,
+    RequestLimits,
     add_jev_confidence,
     check_batch_limits,
     check_request_limits,
@@ -44,6 +45,8 @@ log = logging.getLogger("deciax.serve")
 
 BUNDLE_REPO = "convaiinnovations/laya"
 ALIASES: dict[str, ModelName] = {
+    "clef": "clef",
+    "clef-flash": "clef-flash",
     "english": "laya",
     "en": "laya",
     "default": "laya",
@@ -67,7 +70,7 @@ REFUSED = (
     "hooks_raise",
     "hooks_timeout",
 )
-UNSUPPORTED = ("task", "lang", "lang_guess", "min_confidence")
+UNSUPPORTED = ("task", "lang", "lang_guess", "min_confidence", "images", "videos", "media_kwargs")
 UNSUPPORTED_BATCH = ("batch_size", "sort_by_length", "diagnostics")
 MAX_TOKEN_BUDGET = max(SEQ_BUCKETS)
 LIVENESS_ONLY = {"status": "ok"}
@@ -181,13 +184,14 @@ class Service:
             raise RequestError(400, "request body must be an object with a 'questions' field")
 
         state, questions = body.get("state"), body["questions"]
-        check_request_limits(state, questions)
+        decider = self.deciders[self.resolve_model(body.get("model"))]
+        limits = getattr(getattr(decider, "model", None), "request_limits", RequestLimits())
+        check_request_limits(state, questions, limits)
         _refuse_controls(body, UNSUPPORTED)
         if has_lone_surrogate(body):
             raise RequestError(400, LONE_SURROGATE_DETAIL)
 
-        decider = self.deciders[self.resolve_model(body.get("model"))]
-        budgets = _budgets(body)
+        budgets = _budgets(body, getattr(getattr(decider, "model", None), "max_token_budget", MAX_TOKEN_BUDGET))
         result, ms = self._infer(lambda: decider.decide(state, questions, **budgets))
 
         return Response(200, self._finish(result), _timing(ms))
@@ -201,13 +205,14 @@ class Service:
             )
 
         states, questions = body["states"], body["questions"]
-        check_batch_limits(states, questions)
+        decider = self.deciders[self.resolve_model(body.get("model"))]
+        limits = getattr(getattr(decider, "model", None), "request_limits", RequestLimits())
+        check_batch_limits(states, questions, limits)
         _refuse_controls(body, UNSUPPORTED + UNSUPPORTED_BATCH)
         if has_lone_surrogate(body):
             raise RequestError(400, LONE_SURROGATE_DETAIL)
 
-        decider = self.deciders[self.resolve_model(body.get("model"))]
-        budgets = _budgets(body)
+        budgets = _budgets(body, getattr(getattr(decider, "model", None), "max_token_budget", MAX_TOKEN_BUDGET))
         results, ms = self._infer(lambda: decider.decide_batch(states, questions, **budgets))
 
         payload = {
@@ -295,7 +300,7 @@ def _refuse_controls(body: Mapping[str, Any], unsupported: tuple[str, ...]) -> N
         raise RequestError(422, f"{', '.join(sent)} is not supported by deciax")
 
 
-def _budgets(body: Mapping[str, Any]) -> dict[str, int]:
+def _budgets(body: Mapping[str, Any], limit: int = MAX_TOKEN_BUDGET) -> dict[str, int]:
     budgets = {}
     for key in ("max_len", "head_max_len"):
         value = body.get(key)
@@ -306,8 +311,8 @@ def _budgets(body: Mapping[str, Any]) -> dict[str, int]:
             raise RequestError(422, f"{key} must be an integer")
         if value <= 0:
             raise RequestError(422, f"{key} must be a positive integer")
-        if value > MAX_TOKEN_BUDGET:
-            raise RequestError(422, f"{key} exceeds the server cap ({value} > {MAX_TOKEN_BUDGET})")
+        if value > limit:
+            raise RequestError(422, f"{key} exceeds the server cap ({value} > {limit})")
 
         budgets[key] = value
 

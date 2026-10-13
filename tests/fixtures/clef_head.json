@@ -1,0 +1,17 @@
+{
+  "source": "https://huggingface.co/Cloudflare/clef/blob/0b331204bb13fbd2ca93a64df1956f5b55478ce5/joint_schema_model.py",
+  "source_sha256": "0e304cf7c6500e8bb59bef7e2afd2c6373f82596dfb3b57d1aa93c175e2dc3a3",
+  "generator": "scripts/clef_head_fixture.py",
+  "seed": 131,
+  "torch": "2.14.1",
+  "dtype": "float32",
+  "config": {
+    "hidden_size": 32,
+    "width": 16,
+    "routing_layers": 2,
+    "layers": 2,
+    "heads": 4,
+    "feedforward": 32
+  },
+  "fixture_sha256": "71608501cbde23198871b978ba0428ebb96830fc647f48b06cd9448070ccf57f"
+}

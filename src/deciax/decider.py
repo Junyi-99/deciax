@@ -11,11 +11,10 @@ import jax.numpy as jnp
 from huggingface_hub import snapshot_download
 
 from deciax.models import MODELS, ModelName
+from deciax.models.base import RequestModel
 from deciax.models.laya.model import LayaModel
 from deciax.ops.backend import ImplChoice
-from deciax.protocol.output import DecisionOutput
-from deciax.protocol.types import State, parse_questions
-from deciax.runtime.engine import Engine
+from deciax.protocol.types import State
 
 type DtypeChoice = Literal["auto", "bf16", "fp32"]
 
@@ -23,9 +22,9 @@ type DtypeChoice = Literal["auto", "bf16", "fp32"]
 class Decider:
     """One loaded checkpoint bound to a runtime engine."""
 
-    def __init__(self, model: LayaModel) -> None:
+    def __init__(self, model: RequestModel) -> None:
         self.model = model
-        self.engine = Engine(model)
+        self.engine = model.build_engine()
 
     def decide(
         self,
@@ -50,26 +49,7 @@ class Decider:
         head_max_len: int | None = None,
     ) -> list[dict[str, Any]]:
         """Answer the same questions about many states, sharing forward passes."""
-        parsed = parse_questions(questions)
-        if not parsed:
-            empty = {"input_tokens": 0, "output_tokens": 0}
-            return [{"model": "laya-rl-agent", "answers": {}, "usage": dict(empty)} for _ in states]
-
-        per_state = [self.model.encode(s, parsed, max_len, head_max_len) for s in states]
-        out = self.engine.run([r for rows in per_state for r in rows])
-
-        results, n = [], len(parsed)
-        for i, rows in enumerate(per_state):
-            part = slice(i * n, (i + 1) * n)
-            sub = DecisionOutput(
-                out.option_logits[part],
-                out.option_mask[part],
-                out.act_logits[part],
-                out.input_tokens[part],
-            )
-            results.append(self.model.decode(rows, sub, parsed))
-
-        return results
+        return self.engine.decide_batch(states, questions, max_len=max_len, head_max_len=head_max_len)
 
 
 def load(
@@ -96,4 +76,12 @@ def load(
         dtype = "bf16" if jax.default_backend() == "tpu" else "fp32"
     jdtype = {"bf16": jnp.bfloat16, "fp32": jnp.float32}[dtype]
 
-    return Decider(LayaModel(path, jdtype, impl))
+    if ckpt.family == "laya":
+        return Decider(LayaModel(path, jdtype, impl))
+    if ckpt.family == "clef":
+        if impl not in ("auto", "jax"):
+            raise ValueError("Clef currently supports auto/jax kernels")
+        from deciax.models.clef.model import ClefModel
+
+        return Decider(ClefModel(path, jdtype, model))
+    raise ValueError(f"unsupported model family: {ckpt.family}")

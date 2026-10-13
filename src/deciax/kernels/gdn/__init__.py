@@ -1,0 +1,1 @@
+"""Gated DeltaNet prefill primitives."""

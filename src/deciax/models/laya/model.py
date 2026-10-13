@@ -11,7 +11,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from deciax.models import modernbert
-from deciax.models.base import EncodedRow
+from deciax.models.base import EncodedRow, RequestEngine
 from deciax.models.laya import heads
 from deciax.models.laya.calibration import Calibration
 from deciax.models.laya.config import LayaConfig
@@ -27,6 +27,13 @@ MODEL_NAME = "laya-rl-agent"
 
 
 class LayaModel:
+    max_token_budget = 1024
+
+    def build_engine(self) -> RequestEngine:
+        from deciax.runtime.engine import Engine
+
+        return Engine(self)
+
     def __init__(self, path: Path, dtype: jnp.dtype = jnp.bfloat16, impl: ImplChoice = "auto") -> None:
         self.config = LayaConfig.from_dir(path)
         self.tokenizer = LayaTokenizer(path / "tokenizer")

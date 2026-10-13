@@ -19,7 +19,7 @@ import gzip
 import html
 import json
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import jax
@@ -55,12 +55,25 @@ class Kernel:
     hbm_write: int
     stays_in_vmem: list[str]
     vmem_measured: int = 0
+    substeps: list[tuple[str, int]] = field(default_factory=list)  # (label, live temporaries in bytes on top of resident)
     call: object = None  # (fn, args): fn(*args) builds the pallas_call on representative inputs; args are jit parameters, not constants
     layers: int = 0
 
     @property
     def blocks_bytes(self) -> int:
         return 2 * (sum(self.blocks_in.values()) + sum(self.blocks_out.values()))
+
+    @property
+    def weights_bytes(self) -> int:  # constant-index operands: resident, single-buffered
+        return sum(v for n, v in self.blocks_in.items() if "^T" in n or n.startswith(("norm", "bias", "cos")))
+
+    @property
+    def stream_bytes(self) -> int:  # row / q / k / v blocks: double-buffered by the pipeline
+        return 2 * (sum(self.blocks_in.values()) - self.weights_bytes + sum(self.blocks_out.values()))
+
+    @property
+    def resident(self) -> int:
+        return self.weights_bytes + self.stream_bytes + self.scratch
 
 
 def kernels_for(model, rows: int, seq: int) -> dict[str, Kernel]:
@@ -94,6 +107,18 @@ def kernels_for(model, rows: int, seq: int) -> dict[str, Kernel]:
             r * d * F32 + d * n * BF16,
             r * n * BF16,
             ["normalized rows (bf16 [tm, D])", "fp32 matmul result before the bf16 cast", "RoPE rotated copy" if with_rope else "bias add"],
+            substeps=[
+                ("DMA x block [tm, D] fp32 (prefetched)", 0),
+                ("LayerNorm -> xn bf16 [tm, D]", tm * d * (F32 + BF16)),
+                *[
+                    (
+                        f"chunk {j}: xn @ W^T[:, {j}D:{j + 1}D] -> bf16" + (" -> RoPE (2 rolls + tiles)" if with_rope and j < 2 else ""),
+                        tm * d * BF16 + tm * d * (F32 + BF16) + (tm * d * (BF16 + 2 * F32) if with_rope and j < 2 else 0),
+                    )
+                    for j in range(n // d)
+                ],
+                ("store out block [tm, N] bf16 -> HBM", tm * d * BF16),
+            ],
             call=(
                 lambda x, w_t, bias, nw, nb: fused.norm_linear(
                     x, nw, nb, eps, w_t, bias, rope=rope if with_rope else None, rope_blocks=2 if with_rope else 0, tn=d
@@ -132,6 +157,14 @@ def kernels_for(model, rows: int, seq: int) -> dict[str, Kernel]:
             rows * (seq * d * BF16 + 2 * visited * tk * d * BF16),
             rows * seq * d * BF16,
             [f"scores s^T fp32 [{tk}, {tq}] per head", "probabilities p (fp32 then bf16)", "running max / sum / accumulator (scratch)", "mask + window bias"],
+            substeps=[
+                ("DMA q, k, v blocks bf16 + mask", 0),
+                ("kk == 0: zero m / l / acc scratch", 0),
+                (f"mask + window -> bias fp32 [{tk}, {tq}]", tk * tq * F32),
+                (f"per head (x{heads}): s^T = k q^T fp32 [{tk}, {tq}] + bias; m, alpha", tk * tq * F32 * 2),
+                ("per head: p = exp(s^T - m) -> bf16; l += sum p; acc += v^T p^T", tk * tq * (F32 * 2 + BF16)),
+                ("last key block: o = (acc / l)^T -> out block bf16 -> HBM", tk * tq * F32 + 64 * tq * F32 * 2),
+            ],
             call=(lambda qkv, mask: pallas.flash_attention(qkv, mask, heads=heads, window=window), (qkv, mask)),
             layers=layers,
         )
@@ -161,6 +194,17 @@ def kernels_for(model, rows: int, seq: int) -> dict[str, Kernel]:
                 "normalized y (bf16)",
                 f"MLP hidden h fp32 [tm, {f}]",
                 "gelu(a) * b / relu(h) (bf16)" if act == "gated_gelu" else "relu(h) (bf16)",
+            ],
+            substeps=[
+                ("DMA att block bf16 + x block fp32 (weights resident)", 0),
+                ("y = att @ Wo^T + bo + x  fp32 [tm, D]", tm * d * F32),
+                ("z = LayerNorm(y) -> bf16 [tm, D]", tm * d * (F32 + BF16)),
+                (f"h = z @ Wi^T + bi  fp32 [tm, {f}]", tm * d * (F32 + BF16) + tm * f * F32),
+                (
+                    f"g = gelu(h[:, :{fp_}]) * h[:, {fp_}:] -> bf16 [tm, {fp_}]" if act == "gated_gelu" else f"g = relu(h) -> bf16 [tm, {fp_}]",
+                    tm * d * F32 + tm * f * F32 + tm * fp_ * (F32 + BF16),
+                ),
+                ("out = g @ Wo2^T + b2 + y -> out block fp32 -> HBM", tm * d * F32 + tm * fp_ * BF16),
             ],
             call=(lambda *a: fused.out_mlp(*a, act=act), (att, x, wo_t, bo, nw, nb, eps, wi_t, bi, wo2_t, b2)),
             layers=layers,
@@ -262,6 +306,100 @@ def trace_forward(model, arrays) -> list[dict]:
         )
     ops.sort(key=lambda o: o["start_us"])
     return ops
+
+
+def svg_flow(model, rows: int, seq: int, kernels: dict[str, Kernel]) -> str:
+    """Architecture as a flow: one box per step of the forward with a 0-128 MiB VMEM bar next to it
+    (weights resident | double-buffered blocks | scratch | live temporaries) and the HBM tensors on
+    the arrows; then every kernel expanded into the sub-steps of one grid step with the analytic
+    live set at each point."""
+    cfg = model.config.encoder
+    d, r = cfg.hidden_size, rows * seq
+    cap = 128 * MB
+    bw, bx, x0, row = 560, 430, 16, 34  # bar width, bar x, box x, row height
+    seg_color = {"weights": "#334155", "blocks x2": "#64748B", "scratch": "#CBD5E1", "live temporaries": "#F59E0B"}
+    kl = kernels
+
+    def bar(y: int, k: Kernel | None, temps: int, note: str = "") -> str:
+        if k is None:
+            return f'<text x="{bx}" y="{y + 17}" fill="#64748B" font-size="11">XLA op: buffers managed by XLA</text>'
+        segs = [("weights", k.weights_bytes), ("blocks x2", k.stream_bytes), ("scratch", k.scratch), ("live temporaries", temps)]
+        x, out = bx, [f'<rect x="{bx}" y="{y + 4}" width="{bw}" height="18" fill="#F8FAFC" stroke="#E2E8F0"/>']
+        for name, b in segs:
+            w = bw * b / cap
+            if w > 0:
+                out.append(f'<rect x="{x:.1f}" y="{y + 4}" width="{w:.1f}" height="18" fill="{seg_color[name]}"><title>{name}: {b / MB:.1f} MB</title></rect>')
+                x += w
+        total = sum(b for _, b in segs)
+        if k.vmem_measured:
+            mx = bx + bw * k.vmem_measured / cap
+            out.append(
+                f'<line x1="{mx:.1f}" x2="{mx:.1f}" y1="{y}" y2="{y + 26}" stroke="#B91C1C" stroke-width="2"><title>measured kernel VMEM {k.vmem_measured / MB:.1f} MB</title></line>'
+            )
+        out.append(f'<text x="{bx + bw + 6}" y="{y + 17}" font-size="11" fill="#0F172A">{total / MB:.0f} MB {note}</text>')
+        return "".join(out)
+
+    def box(y: int, label: str, color: str, sub: str = "") -> str:
+        w = bx - x0 - 12
+        return (
+            f'<g><title>{html.escape(sub or label)}</title><rect x="{x0}" y="{y}" width="{w}" height="26" rx="4" fill="{color}" opacity="0.15" stroke="{color}"/>'
+            f'<text x="{x0 + 8}" y="{y + 17}" font-size="11" font-weight="600" textLength="{min(w - 16, 6.2 * len(label)):.0f}" lengthAdjust="spacingAndGlyphs">{html.escape(label)}</text></g>'
+        )
+
+    def arrow(y: int, label: str) -> str:
+        return f'<line x1="{x0 + 60}" x2="{x0 + 60}" y1="{y - 8}" y2="{y + 4}" stroke="#94A3B8" marker-end="url(#ah)"/><text x="{x0 + 70}" y="{y + 1}" font-size="10" fill="#B45309">{html.escape(label)}</text>'
+
+    temps = lambda k: max(k.vmem_measured - k.resident, 0)
+    n_enc = len(cfg.layer_types)
+    steps = [
+        ("embedding gather (XLA, SparseCore offload)", None, "", f"x fp32 {r * d * F32 / 1e6:.0f} MB"),
+        ("embedding LayerNorm (XLA fusion)", None, "", f"x fp32 {r * d * F32 / 1e6:.0f} MB"),
+        (f"encoder layer i (x{n_enc}): norm_linear_rope", kl["norm_linear_rope"], "LN -> @Wqkv -> RoPE", f"qkv bf16 {r * 3 * d * BF16 / 1e6:.0f} MB"),
+        (
+            "    flash_attention (w64 sliding / w0 full)",
+            kl["flash_attention_w64"],
+            "online softmax over key blocks; key mask and sliding window built in VMEM",
+            f"att bf16 {r * d * BF16 / 1e6:.0f} MB (+ x fp32 {r * d * F32 / 1e6:.0f} MB re-read)",
+        ),
+        ("    out_mlp_gated_gelu", kl["out_mlp_gated_gelu"], "@Wo + x -> LN -> @Wi -> gelu*b -> @Wo2 + y", f"x fp32 {r * d * F32 / 1e6:.0f} MB -> next layer"),
+        ("final LayerNorm + type_emb add (XLA)", None, "", f"x fp32 {r * d * F32 / 1e6:.0f} MB"),
+        (f"head layer j (x{model.config.head_layers}): norm_linear", kl["norm_linear"], "LN -> @in_proj + bias", f"qkv bf16 {r * 3 * d * BF16 / 1e6:.0f} MB"),
+        ("    flash_attention_w0", kl["flash_attention_w0"], "full attention", f"att bf16 {r * d * BF16 / 1e6:.0f} MB"),
+        ("    out_mlp_relu", kl["out_mlp_relu"], "@out_proj + x -> LN -> @linear1 -> relu -> @linear2 + y", f"x fp32 {r * d * F32 / 1e6:.0f} MB"),
+        ("scorer + act head (XLA, marker rows only)", None, "", "option / act logits"),
+    ]
+    parts, y = [], 44
+    for label, k, sub, hbm in steps:
+        color = COLOR[k.kind] if k else COLOR["xla"]
+        parts.append(box(y, label, color, sub))
+        parts.append(bar(y, k, temps(k) if k else 0, "measured" if k else ""))
+        y += row
+        parts.append(arrow(y, "HBM: " + hbm))
+        y += 16
+    for kind in KINDS:
+        k = kl[kind]
+        y += 26
+        parts.append(
+            f'<text x="{x0}" y="{y}" font-size="13" font-weight="600" fill="{COLOR[kind]}">{kind}: one grid step of {k.grid_steps} per call, {k.layers} layers. '
+            f"resident = weights {k.weights_bytes / MB:.1f} + blocks x2 {k.stream_bytes / MB:.1f} + scratch {k.scratch / MB:.1f} MB; measured peak {k.vmem_measured / MB:.1f} MB (red tick)</text>"
+        )
+        y += 10
+        for i, (label, live) in enumerate(k.substeps):
+            parts.append(box(y, f"{i + 1}. {label}", COLOR[kind]))
+            parts.append(bar(y, k, live, f"(live {live / MB:.1f} MB)"))
+            y += row
+    legend = "".join(
+        f'<rect x="{bx + i * 130}" y="12" width="12" height="12" fill="{c}"/><text x="{bx + i * 130 + 16}" y="22" font-size="11">{n}</text>'
+        for i, (n, c) in enumerate(seg_color.items())
+    )
+    legend += f'<line x1="{bx + 530}" x2="{bx + 530}" y1="10" y2="26" stroke="#B91C1C" stroke-width="2"/><text x="{bx + 536}" y="22" font-size="11">measured peak</text>'
+    return (
+        f'<svg width="1180" height="{y + 20}" font-family="-apple-system,Helvetica,Arial,sans-serif">'
+        '<defs><marker id="ah" markerWidth="6" markerHeight="6" refX="3" refY="5" orient="auto"><path d="M0,0 L6,0 L3,6 z" fill="#94A3B8"/></marker></defs>'
+        f'<text x="{x0}" y="22" font-size="13" font-weight="600">Forward pass as a flow; VMEM bar per step, 0 - 128 MiB</text>{legend}'
+        + "".join(parts)
+        + "</svg>"
+    )
 
 
 def render(model, rows: int, seq: int, kernels: dict[str, Kernel], ops: list[dict], device: str) -> str:
@@ -405,6 +543,10 @@ th{background:#F1F5F9}td:nth-child(n+2):nth-child(-n+4),td:nth-child(6),td:nth-c
 <h1>VMEM occupancy and HBM traffic, one fused forward ({rows} rows x {seq} tokens, {device})</h1>
 <p class="so"><b>So what:</b> the forward runs {len([o for o in ops if o["kind"] != "xla"])} Pallas kernels in {total_us / 1000:.1f} ms; the kernels hold {total_us and (total_us - xla_us) / total_us:.0%} of the time. Peak VMEM is {vmem_peak / MB:.0f} MB of 128 MiB (out_mlp: {kernels["out_mlp_gated_gelu"].vmem_measured / MB:.0f} MB = the three resident weight matrices, {sum(v for n, v in kernels["out_mlp_gated_gelu"].blocks_in.items() if n.startswith("W")) / MB:.0f} MB, plus double-buffered row blocks and the fp32 MLP hidden of one row block); the kernels never come near the 96 MB limit, so there is headroom for bigger row blocks or a one-kernel-per-layer design at this sequence length. HBM traffic is {hbm_total / 1e9:.1f} GB per call ({hbm_total / 1e3 / total_us:.0f} GB/s average); every per-token intermediate of a layer stays in VMEM, what still crosses HBM is the three cross-kernel tensors per layer (qkv, att, the residual stream) and the weights.</p>
 <div class="legend">{legend} &nbsp;|&nbsp; VMEM = smallest <code>vmem_limit_bytes</code> that compiles (binary search, 0.25 MB); XLA ops (grey, no VMEM shown) are the glue between kernels (embedding gather, norms, scorer).</div>
+<h2>Architecture: the forward as a flow, VMEM per step</h2>
+<p><small>Top: the model-level flow; each step's bar is the VMEM the kernel holds while it runs (resident weights, the pipeline's double-buffered activation blocks, scratch, and the body's live temporaries = measured minus the rest); the orange labels on the arrows are the tensors that cross HBM between steps. Below: each kernel expanded into the sub-steps of one grid step with the analytic live set at that point. The analytic live set is an upper bound (Mosaic frees dead values and streams matmul results), so the measured peak, the red tick, sits below the largest sub-step.</small></p>
+{svg_flow(model, rows, seq, kernels)}
+<h2>Timeline</h2>
 {svg_timeline(0, total_us, W, H1, H2, "Whole forward")}
 {svg_timeline(0, zoom_hi, W, H1, H2, "Zoom: encoder layers 0-2 (norm_linear_rope -> flash_attention -> out_mlp per layer)")}
 <h2>Per kernel</h2>

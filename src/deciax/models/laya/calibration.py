@@ -9,12 +9,13 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 
-QTYPES = {"choice": 0, "score": 1, "noul": 2}
+from deciax.protocol.types import QTYPES, QuestionType
+
 TEMP_MIN = 0.5
 TEMP_MAX = 5.0
 
 
-def temp_bucket(qtype: str, k: int) -> str:
+def temp_bucket(qtype: QuestionType, k: int) -> str:
     size = "2" if k <= 2 else "3-5" if k <= 5 else "6-10" if k <= 10 else "11+"
     return f"{qtype}:{size}"
 
@@ -43,7 +44,7 @@ class Calibration:
         self.temperature = [clamp_temperature(t) for t in temperature]
         self.temperature_by_options = {k: clamp_temperature(v) for k, v in temperature_by_options.items()}
 
-    def temperature_for(self, qtype: str, k: int, lang: str | None = None) -> float:
+    def temperature_for(self, qtype: QuestionType, k: int, lang: str | None = None) -> float:
         if lang is not None:
             raise NotImplementedError("per-language temperatures")
 

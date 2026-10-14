@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Literal
 
 type Impl = Literal["jax", "pallas"]
+type ImplChoice = Literal["auto", "jax", "pallas"]  # what callers pass; `resolve` turns "auto" into an `Impl`
 
 
 def default_impl() -> Impl:
@@ -13,9 +14,9 @@ def default_impl() -> Impl:
     return "pallas" if jax.default_backend() == "tpu" else "jax"
 
 
-def resolve(impl: str) -> Impl:
+def resolve(impl: ImplChoice) -> Impl:
     if impl == "auto":
         return default_impl()
     if impl in ("jax", "pallas"):
-        return impl  # type: ignore[return-value]
+        return impl
     raise ValueError(f"impl must be 'auto', 'jax' or 'pallas', got {impl!r}")

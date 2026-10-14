@@ -4,6 +4,8 @@ from typing import Any
 
 import pytest
 
+from deciax.models import ModelName
+
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
@@ -26,7 +28,7 @@ def laya_fixture(name: str) -> dict[str, Any]:
     return json.loads((FIXTURES / "laya" / f"{name}.json").read_text())  # type: ignore[no-any-return]
 
 
-def checkpoint_dir(name: str) -> Path:
+def checkpoint_dir(name: ModelName) -> Path:
     """The cached checkpoint, or skip: tests never download weights."""
     from huggingface_hub import snapshot_download
     from huggingface_hub.errors import LocalEntryNotFoundError

@@ -1,5 +1,8 @@
 # deciax
 
+[![PyPI Version](https://img.shields.io/pypi/v/deciax?color=3775A9&logo=pypi&logoColor=white)](https://pypi.org/project/deciax/)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1sY_4BeRq_em4tzePW3poPyl-lGXyxO1g?usp=sharing)
+
 High-performance decision models on TPUs, powered by JAX and Pallas.
 
 ## Install

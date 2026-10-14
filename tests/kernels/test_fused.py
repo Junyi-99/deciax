@@ -7,19 +7,29 @@ import pytest
 
 from deciax import nn
 from deciax.kernels import fused
-from deciax.kernels.attention import reference
+from deciax.kernels.attention import pallas, reference
 
 pytestmark = pytest.mark.tpu
 
 D, HEADS, EPS = 256, 4, 1e-5
 
 
-def _normal(key, shape, scale=1.0, dtype=jnp.float32):
+def _normal(key: jax.Array, shape: tuple[int, ...], scale: float = 1.0, dtype: jnp.dtype = jnp.float32) -> jax.Array:
     return (jax.random.normal(key, shape, jnp.float32) * scale).astype(dtype)
 
 
-def _close(got, want, rtol=2e-2, atol=2e-2):
+def _close(got: jax.Array | np.ndarray, want: jax.Array | np.ndarray, rtol: float = 2e-2, atol: float = 2e-2) -> None:
     np.testing.assert_allclose(np.asarray(got, np.float32), np.asarray(want, np.float32), rtol=rtol, atol=atol)
+
+
+def _mlp_weights(k1: jax.Array, k2: jax.Array, act: str) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
+    """PyTorch-layout wi, wo2 and the kernel layout wi_t, wo2_t. Gated Fi = 320 is not a lane
+    multiple, so it exercises `pad_gated`."""
+    fi = 320 if act == "gated_gelu" else 512
+    wi = _normal(k1, ((2 if act == "gated_gelu" else 1) * fi, D), D**-0.5, jnp.bfloat16)
+    wo2 = _normal(k2, (D, fi), fi**-0.5, jnp.bfloat16)
+    wi_t, wo2_t = fused.pad_gated(wi, wo2) if act == "gated_gelu" else (wi.T, wo2.T)
+    return wi, wo2, wi_t, wo2_t
 
 
 @pytest.mark.parametrize("normalize", [True, False])
@@ -43,25 +53,19 @@ def test_norm_linear_rope(normalize: bool, rows: int, seq: int) -> None:
 
 @pytest.mark.parametrize("act", ["gated_gelu", "relu"])
 def test_out_mlp(act: str) -> None:
-    rows, fi = 512, 320 if act == "gated_gelu" else 512  # 320: not a lane multiple, exercises the padding
+    rows = 512
     ks = jax.random.split(jax.random.key(1), 9)
     att = _normal(ks[0], (rows, D), 1.0, jnp.bfloat16)
     x = _normal(ks[1], (rows, D), 2.0)
     wo = _normal(ks[2], (D, D), D**-0.5, jnp.bfloat16)
     bo, nw, nb, b2 = (_normal(k, (D,), 0.1) for k in ks[3:7])
-    wi = _normal(ks[7], ((2 if act == "gated_gelu" else 1) * fi, D), D**-0.5, jnp.bfloat16)
-    wo2 = _normal(ks[8], (D, fi), fi**-0.5, jnp.bfloat16)
-    bi = jnp.zeros((wi.shape[0],), jnp.float32)
+    wi, wo2, wi_t, wo2_t = _mlp_weights(ks[7], ks[8], act)
+    bi = jnp.zeros((wi_t.shape[1],), jnp.float32)
 
-    if act == "gated_gelu":
-        wi_t, wo2_t = fused.pad_gated(wi, wo2)
-        bi_k = jnp.zeros((wi_t.shape[1],), jnp.float32)
-    else:
-        wi_t, wo2_t, bi_k = wi.T, wo2.T, bi
-    got = fused.out_mlp(att, x, wo.T, bo, nw, nb, EPS, wi_t, bi_k, wo2_t, b2, act=act)
+    got = fused.out_mlp(att, x, wo.T, bo, nw, nb, EPS, wi_t, bi, wo2_t, b2, act=act)
 
     y = nn.linear(att, wo, bo) + x
-    h = nn.linear(nn.layer_norm(y, nw, nb, EPS).astype(jnp.bfloat16), wi, bi)
+    h = nn.linear(nn.layer_norm(y, nw, nb, EPS).astype(jnp.bfloat16), wi)
     if act == "gated_gelu":
         a, b = jnp.split(h, 2, -1)
         g = jax.nn.gelu(a, approximate=False) * b
@@ -73,8 +77,6 @@ def test_out_mlp(act: str) -> None:
 
 @pytest.mark.parametrize(("seq", "window"), [(256, 0), (512, 64), (1024, 64), (1024, 0)])
 def test_flash_attention(seq: int, window: int) -> None:
-    from deciax.kernels.attention import pallas
-
     b = 2
     ks = jax.random.split(jax.random.key(2), 3)
     q, k, v = (_normal(key, (b, seq, HEADS, 64), 1.0, jnp.bfloat16) for key in ks)
@@ -89,9 +91,7 @@ def test_flash_attention(seq: int, window: int) -> None:
 @pytest.mark.parametrize(("seq", "window", "act"), [(128, 0, "gated_gelu"), (256, 64, "gated_gelu"), (512, 0, "relu"), (64, 64, "relu")])
 def test_layer_matches_three_kernels(seq: int, window: int, act: str) -> None:
     """One-kernel layer vs norm_linear -> flash_attention -> out_mlp on the same weights."""
-    from deciax.kernels.attention import pallas
-
-    b, fi = 4, 320 if act == "gated_gelu" else 512
+    b = 4
     rows = b * seq
     ks = jax.random.split(jax.random.key(3), 12)
     x = _normal(ks[0], (rows, D), 2.0)
@@ -101,19 +101,15 @@ def test_layer_matches_three_kernels(seq: int, window: int, act: str) -> None:
     b_qkv = _normal(ks[6], (3 * D,), 0.1)
     wo = _normal(ks[7], (D, D), D**-0.5, jnp.bfloat16)
     bo, b2 = _normal(ks[8], (D,), 0.1), _normal(ks[9], (D,), 0.1)
-    wi = _normal(ks[10], ((2 if act == "gated_gelu" else 1) * fi, D), D**-0.5, jnp.bfloat16)
-    wo2 = _normal(ks[11], (D, fi), fi**-0.5, jnp.bfloat16)
-    if act == "gated_gelu":
-        wi_t, wo2_t = fused.pad_gated(wi, wo2)
-    else:
-        wi_t, wo2_t = wi.T, wo2.T
+    _, _, wi_t, wo2_t = _mlp_weights(ks[10], ks[11], act)
     bi = jnp.zeros((wi_t.shape[1],), jnp.float32)
     rope = fused.rope_tables(nn.rope_inv_freq(64, 10000.0), seq)
+    w = fused.LayerParams(n1w, n1b, w_qkv.T, b_qkv, wo.T, bo, n2w, n2b, wi_t, bi, wo2_t, b2)
 
-    got = fused.layer(x, mask, n1w, n1b, w_qkv.T, b_qkv, rope, wo.T, bo, n2w, n2b, wi_t, bi, wo2_t, b2, seq=seq, heads=HEADS, window=window, eps=EPS, act=act)
+    got = fused.layer(x, mask, w, seq=seq, heads=HEADS, eps=EPS, act=act, window=window, rope=rope)
 
     qkv = fused.norm_linear(x, n1w, n1b, EPS, w_qkv.T, b_qkv, rope=rope, rope_blocks=2, tn=D)
     att = pallas.flash_attention(qkv.reshape(b, seq, 3 * D), mask, heads=HEADS, window=window).reshape(rows, D)
     want = fused.out_mlp(att, x, wo.T, bo, n2w, n2b, EPS, wi_t, bi, wo2_t, b2, act=act)
-    valid = np.repeat(np.asarray(mask, bool).reshape(-1), 1)
+    valid = np.asarray(mask, bool).reshape(-1)
     _close(np.asarray(got)[valid], np.asarray(want)[valid], rtol=1e-2, atol=5e-2)

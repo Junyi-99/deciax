@@ -67,10 +67,11 @@ def decision_heads(
             jax.nn.relu(_linear(p, f"{k}.linear1", _norm(p, f"{k}.norm2", x))),
         )
 
-    return _scorer(p, x, marker_mask, marker_pos)
+    return _scorer(p, x, marker_pos, marker_mask)
 
 
-def _scorer(p: dict[str, jax.Array], x: jax.Array, marker_mask: jax.Array, marker_pos: jax.Array) -> tuple[jax.Array, jax.Array]:
+def _scorer(p: dict[str, jax.Array], x: jax.Array, marker_pos: jax.Array, marker_mask: jax.Array) -> tuple[jax.Array, jax.Array]:
+    """[B, S, D] head output -> (option logits, act logits)."""
     m = jnp.take_along_axis(x, jnp.maximum(marker_pos, 0)[..., None], axis=1)
     hidden = jax.nn.gelu(_linear(p, "scorer.1", _norm(p, "scorer.0", m)), approximate=False)
     logits = jnp.where(marker_mask, _linear(p, "scorer.3", hidden)[..., 0], OPTION_MASK_FILL)
@@ -96,6 +97,7 @@ def _scorer(p: dict[str, jax.Array], x: jax.Array, marker_mask: jax.Array, marke
 
 
 def prepare_fused(p: dict[str, jax.Array], head_layers: int) -> dict[str, jax.Array]:
+    """Matmul weights transposed to [in, out]."""
     out = {}
     for i in range(head_layers):
         k = f"head.layers.{i}"
@@ -116,67 +118,28 @@ def decision_heads_fused(
     qtype: jax.Array,
     head_layers: int,
 ) -> tuple[jax.Array, jax.Array]:
-    """`decision_heads` with the fused kernels: full attention, ReLU MLP, biases everywhere."""
-
+    """`decision_heads` on the fused kernels."""
     batch, seq, d = x.shape
     x = (x + p["type_emb.weight"][qtype][:, None, :]).reshape(batch * seq, d)
+
     for i in range(head_layers):
         k = f"head.layers.{i}"
-        with jax.named_scope(f"head{i}"):
-            x = _head_layer_fused(p, fp, k, x, attention_mask, batch, seq, d)
-    with jax.named_scope("scorer"):
-        return _scorer(p, x.reshape(batch, seq, d), marker_mask, marker_pos)
-
-
-def _head_layer_fused(
-    p: dict[str, jax.Array],
-    fp: dict[str, jax.Array],
-    k: str,
-    x: jax.Array,
-    attention_mask: jax.Array,
-    batch: int,
-    seq: int,
-    d: int,
-) -> jax.Array:
-    """One head layer, [B * S, D] fp32 in and out (nn.TransformerEncoderLayer, pre-norm, ReLU FFN)."""
-    from deciax.kernels.attention import pallas
-
-    if seq <= fused.LAYER_MAX_SEQ:  # whole sequences fit in VMEM: one kernel for the layer
-        return fused.layer(
-            x,
-            attention_mask,
-            p[f"{k}.norm1.weight"],
-            p[f"{k}.norm1.bias"],
-            fp[f"{k}.in_projT"],
-            p[f"{k}.self_attn.in_proj_bias"],
-            None,
-            fp[f"{k}.out_projT"],
-            p[f"{k}.self_attn.out_proj.bias"],
-            p[f"{k}.norm2.weight"],
-            p[f"{k}.norm2.bias"],
-            fp[f"{k}.linear1T"],
-            p[f"{k}.linear1.bias"],
-            fp[f"{k}.linear2T"],
-            p[f"{k}.linear2.bias"],
-            seq=seq,
-            heads=d // HEAD_DIM,
-            window=0,
-            eps=HEAD_NORM_EPS,
-            act="relu",
+        w = fused.LayerParams(
+            norm1_w=p[f"{k}.norm1.weight"],
+            norm1_b=p[f"{k}.norm1.bias"],
+            w_qkv_t=fp[f"{k}.in_projT"],
+            b_qkv=p[f"{k}.self_attn.in_proj_bias"],
+            wo_t=fp[f"{k}.out_projT"],
+            bo=p[f"{k}.self_attn.out_proj.bias"],
+            norm2_w=p[f"{k}.norm2.weight"],
+            norm2_b=p[f"{k}.norm2.bias"],
+            wi_t=fp[f"{k}.linear1T"],
+            bi=p[f"{k}.linear1.bias"],
+            wo2_t=fp[f"{k}.linear2T"],
+            b2=p[f"{k}.linear2.bias"],
         )
-    qkv = fused.norm_linear(x, p[f"{k}.norm1.weight"], p[f"{k}.norm1.bias"], HEAD_NORM_EPS, fp[f"{k}.in_projT"], p[f"{k}.self_attn.in_proj_bias"], tn=d)
-    att = pallas.flash_attention(qkv.reshape(batch, seq, 3 * d), attention_mask, heads=d // HEAD_DIM)
-    return fused.out_mlp(
-        att.reshape(batch * seq, d),
-        x,
-        fp[f"{k}.out_projT"],
-        p[f"{k}.self_attn.out_proj.bias"],
-        p[f"{k}.norm2.weight"],
-        p[f"{k}.norm2.bias"],
-        HEAD_NORM_EPS,
-        fp[f"{k}.linear1T"],
-        p[f"{k}.linear1.bias"],
-        fp[f"{k}.linear2T"],
-        p[f"{k}.linear2.bias"],
-        act="relu",
-    )
+        with jax.named_scope(f"head{i}"):
+            x = fused.encoder_layer(x, attention_mask, w, seq=seq, heads=d // HEAD_DIM, eps=HEAD_NORM_EPS, act="relu")
+
+    with jax.named_scope("scorer"):
+        return _scorer(p, x.reshape(batch, seq, d), marker_pos, marker_mask)

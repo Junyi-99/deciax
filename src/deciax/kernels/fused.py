@@ -1,40 +1,33 @@
 """Fused encoder-layer kernels for TPU (Pallas / Mosaic).
 
-The XLA path streams every intermediate of a transformer layer through HBM (~3 GB per layer at
-64 x 256 tokens on laya, xprof: every op HBM-bound). These two kernels keep the intermediates in
-VMEM and touch HBM once per layer for the residual stream and once for the weights:
-
-- `norm_linear`: fp32 residual -> LayerNorm -> bf16 matmul (+ bias) [-> RoPE on the q / k blocks] -> bf16.
-- `out_mlp`: att @ Wo (+ bias) + residual -> LayerNorm -> Wi (+ bias) -> gated GELU | ReLU -> Wo2 (+ bias)
-  + residual -> fp32.
-
-Rows are the flattened (batch, position) axis; weights have constant block indices, so the
+Rows are the flattened (batch, position) axis. Weights use constant block indices, so the
 pipeline fetches them once and keeps them resident in VMEM for the whole grid.
 """
 
 from __future__ import annotations
 
 import math
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 import jax
 import jax.numpy as jnp
 from jax.experimental import pallas as pl
 from jax.experimental.pallas import tpu as pltpu
 
-HEAD_DIM = 64  # rotate-half RoPE below assumes 64-wide heads (two heads per 128-lane vreg)
+from deciax.kernels.attention.pallas import F32, HEAD_DIM, VMEM_LIMIT, Ref, flash_attention, head_cols, mask_bias, pv_t, scores_t
+
 LANE = 128
-VMEM_LIMIT = 96 * 1024 * 1024
 TM = 512  # row block
-LAYER_MAX_SEQ = 512  # `layer` (one kernel per layer, whole sequences in VMEM) is used up to this sequence length
-MASK_FILL = -1e30
-F32 = jnp.float32
+LAYER_MAX_SEQ = 512  # longest sequence `encoder_layer` runs as a single kernel
+
+type Inputs = list[tuple[jax.Array, pl.BlockSpec]]
 
 
 @dataclass(frozen=True)
 class Rope:
-    """cos / sin tables for `norm_linear`: [L, 128] fp32, one head's cos duplicated across the
-    two 64-lane halves; `seq` = positions per sequence (rows = batch * seq)."""
+    """cos / sin [S, 128] fp32, covering two 64-wide heads."""
 
     cos: jax.Array
     sin: jax.Array
@@ -43,13 +36,39 @@ class Rope:
 
 def rope_tables(inv_freq: jax.Array, seq: int) -> Rope:
     freqs = jnp.arange(seq, dtype=F32)[:, None] * inv_freq[None, :]  # [S, 32]
-    cos = jnp.tile(jnp.cos(freqs), (1, 4))  # [S, 128]: (first half, second half) x two heads
-    sin = jnp.tile(jnp.sin(freqs), (1, 4))
+    cos, sin = (jnp.tile(f(freqs), (1, 4)) for f in (jnp.cos, jnp.sin))
     return Rope(cos, sin, seq)
 
 
-def _row_block(rows: int) -> int:
-    return min(TM, rows)
+@dataclass(frozen=True)
+class LayerParams:
+    """Pre-norm transformer layer: matmul weights [in, out], 1-D vectors. The MLP is gated GELU
+    (wi_t [D, 2 * Fp] from `pad_gated`) or ReLU (wi_t [D, F])."""
+
+    norm1_w: jax.Array
+    norm1_b: jax.Array
+    w_qkv_t: jax.Array
+    b_qkv: jax.Array
+    wo_t: jax.Array
+    bo: jax.Array
+    norm2_w: jax.Array
+    norm2_b: jax.Array
+    wi_t: jax.Array
+    bi: jax.Array
+    wo2_t: jax.Array
+    b2: jax.Array
+
+
+def pad_gated(wi: jax.Array, wo2: jax.Array) -> tuple[jax.Array, jax.Array]:
+    """PyTorch gated-MLP weights wi [2 * Fi, D], wo2 [D, Fi] -> wi_t [D, 2 * Fp], wo2_t [Fp, D] with
+    Fi zero-padded to a multiple of 128 (gelu(0) * 0 = 0)."""
+    fi = wo2.shape[1]
+    pad = ((0, -fi % LANE), (0, 0))
+    wi_t = jnp.concatenate([jnp.pad(wi[:fi], pad), jnp.pad(wi[fi:], pad)], 0).T
+    return wi_t, jnp.pad(wo2.T, pad)
+
+
+# ---------------------------------------------------------------- in-kernel math
 
 
 def _layer_norm(x: jax.Array, w: jax.Array, b: jax.Array, eps: float) -> jax.Array:
@@ -58,14 +77,97 @@ def _layer_norm(x: jax.Array, w: jax.Array, b: jax.Array, eps: float) -> jax.Arr
     return z * w + b
 
 
+def _gelu(a: jax.Array) -> jax.Array:
+    """Exact (erf) GELU, as jax.nn.gelu(approximate=False)."""
+    return 0.5 * a * (1.0 + jax.lax.erf(a * (1.0 / math.sqrt(2.0))))
+
+
+def _dense(x: jax.Array, w: jax.Array, b: jax.Array) -> jax.Array:
+    return jnp.dot(x, w, preferred_element_type=F32) + b.astype(F32)
+
+
 def _rope(y: jax.Array, cos: jax.Array, sin: jax.Array) -> jax.Array:
-    """Rotate-half RoPE on a [tm, tn] block holding tn / 64 heads side by side, in y's dtype."""
-    tn = y.shape[1]
-    first_half = jax.lax.broadcasted_iota(jnp.int32, y.shape, 1) % HEAD_DIM < HEAD_DIM // 2
-    # rotated[l] = -x[l + 32] in the first half of every head, x[l - 32] in the second half
-    rotated = jnp.where(first_half, -pltpu.roll(y, tn - 32, 1), pltpu.roll(y, 32, 1))
+    """Rotate-half RoPE on [tm, tn] holding tn / 64 heads side by side, in y's dtype."""
+    tn, half = y.shape[1], HEAD_DIM // 2
+    first_half = jax.lax.broadcasted_iota(jnp.int32, y.shape, 1) % HEAD_DIM < half
+    rotated = jnp.where(first_half, -pltpu.roll(y, tn - half, 1), pltpu.roll(y, half, 1))  # [-x2, x1] per head
     reps = tn // LANE
     return y * jnp.tile(cos, (1, reps)).astype(y.dtype) + rotated * jnp.tile(sin, (1, reps)).astype(y.dtype)
+
+
+def _norm_project(
+    x: jax.Array,
+    nw_ref: Ref,
+    nb_ref: Ref,
+    w_ref: Ref,
+    b_ref: Ref,
+    o_ref: Ref,
+    *,
+    eps: float,
+    normalize: bool,
+    tn: int,
+    rope: tuple[jax.Array, jax.Array] | None,
+    rope_blocks: int,
+) -> None:
+    """o_ref = LayerNorm(x) @ w + b, column chunk by chunk; RoPE on chunks j < rope_blocks."""
+    xn = (_layer_norm(x, nw_ref[...], nb_ref[...], eps) if normalize else x).astype(w_ref.dtype)
+    for j in range(w_ref.shape[1] // tn):
+        cols = slice(j * tn, (j + 1) * tn)
+        y = _dense(xn, w_ref[:, cols], b_ref[:, cols]).astype(o_ref.dtype)
+        if rope is not None and j < rope_blocks:
+            y = _rope(y, *rope)
+        o_ref[:, cols] = y
+
+
+def _mlp(y: jax.Array, nw_ref: Ref, nb_ref: Ref, wi_ref: Ref, bi_ref: Ref, wo2_ref: Ref, b2_ref: Ref, *, eps: float, act: str) -> jax.Array:
+    """y + act(LayerNorm(y) @ wi + bi) @ wo2 + b2, fp32."""
+    h = _dense(_layer_norm(y, nw_ref[...], nb_ref[...], eps).astype(wi_ref.dtype), wi_ref[...], bi_ref[...])
+    fp = wo2_ref.shape[0]
+    g = _gelu(h[:, :fp]) * h[:, fp:] if act == "gated_gelu" else jnp.maximum(h, 0.0)
+    return _dense(g.astype(wo2_ref.dtype), wo2_ref[...], b2_ref[...]) + y
+
+
+def _check_mlp(act: str, wi_t: jax.Array, wo2_t: jax.Array) -> None:
+    f, fp = wi_t.shape[1], wo2_t.shape[0]
+    assert act in ("gated_gelu", "relu") and f == (2 * fp if act == "gated_gelu" else fp), (act, f, fp)
+
+
+# ---------------------------------------------------------------- pallas_call plumbing
+
+
+def _vec(v: jax.Array) -> jax.Array:
+    return v.reshape(1, -1)
+
+
+def _rows(tm: int, width: int) -> pl.BlockSpec:
+    return pl.BlockSpec((tm, width), lambda i: (i, 0))
+
+
+def _resident(*arrays: jax.Array) -> Inputs:
+    return [(a, pl.BlockSpec(a.shape, lambda i: (0, 0))) for a in arrays]
+
+
+def _row_call(
+    kernel: Callable[..., None],
+    inputs: Inputs,
+    out: tuple[int, int],
+    out_dtype: Any,
+    tm: int,
+    name: str,
+    scratch: Sequence[Any] = (),
+) -> jax.Array:
+    """pallas_call over row blocks of `tm`; `inputs` pairs each array with its BlockSpec."""
+    arrays, specs = zip(*inputs, strict=True)
+    return pl.pallas_call(  # type: ignore[no-any-return]
+        kernel,
+        out_shape=jax.ShapeDtypeStruct(out, out_dtype),  # type: ignore[no-untyped-call]
+        grid_spec=pl.GridSpec(grid=(out[0] // tm,), in_specs=list(specs), out_specs=_rows(tm, out[1]), scratch_shapes=scratch),
+        compiler_params=pltpu.CompilerParams(dimension_semantics=("parallel",), vmem_limit_bytes=VMEM_LIMIT),
+        name=name,
+    )(*arrays)
+
+
+# ---------------------------------------------------------------- kernels
 
 
 def norm_linear(
@@ -79,68 +181,35 @@ def norm_linear(
     normalize: bool = True,
     rope: Rope | None = None,
     rope_blocks: int = 0,
-    out_dtype: jnp.dtype = jnp.bfloat16,
     tn: int | None = None,
 ) -> jax.Array:
-    """[R, D] fp32 -> LayerNorm (if `normalize`) -> cast -> @ w_t [D, N] + bias [N] -> [R, N].
+    """[R, D] fp32 -> LayerNorm (if `normalize`) -> @ w_t [D, N] + bias -> [R, N] bf16.
 
-    The grid runs over row blocks only; w_t stays resident in VMEM and the kernel walks its
-    column chunks of `tn` (default D). With `rope`, chunks j < rope_blocks (the q and k heads)
-    get rotate-half RoPE at position = row % rope.seq, applied in the output dtype as the jnp
-    path does; `tn` must then be a multiple of 64.
+    The kernel walks w_t in column chunks of `tn` (default D). With `rope`, chunks j < rope_blocks
+    (q and k) get RoPE at position row % rope.seq, in bf16 like the jnp path.
     """
     rows, d = x.shape
     n = w_t.shape[1]
-    tm = _row_block(rows)
+    tm = min(TM, rows)
     tn = tn or (d if n % d == 0 else n)
     assert rows % tm == 0 and n % tn == 0 and tn % LANE == 0, (rows, n, tm, tn)
-    chunks = n // tn
 
-    in_specs = [
-        pl.BlockSpec((tm, d), lambda i: (i, 0)),
-        pl.BlockSpec((1, d), lambda i: (0, 0)),
-        pl.BlockSpec((1, d), lambda i: (0, 0)),
-        pl.BlockSpec((d, n), lambda i: (0, 0)),
-        pl.BlockSpec((1, n), lambda i: (0, 0)),
-    ]
-    args = [x, norm_w.reshape(1, d), norm_b.reshape(1, d), w_t, bias.reshape(1, n)]
+    inputs = [(x, _rows(tm, d)), *_resident(_vec(norm_w), _vec(norm_b), w_t, _vec(bias))]
     if rope is not None:
         seq = rope.seq
         assert tm % seq == 0 or seq % tm == 0, (tm, seq)
-        if tm >= seq:  # the block holds whole sequences: one constant [tm, 128] table
-            cos, sin = (jnp.tile(t, (tm // seq, 1)) for t in (rope.cos, rope.sin))
-            pos_map = lambda i: (0, 0)
+        if tm >= seq:  # whole sequences per block: one constant table
+            inputs += _resident(jnp.tile(rope.cos, (tm // seq, 1)), jnp.tile(rope.sin, (tm // seq, 1)))
         else:
-            cos, sin = rope.cos, rope.sin
-            pos_map = lambda i: (i % (seq // tm), 0)
-        in_specs += [pl.BlockSpec((tm, LANE), pos_map), pl.BlockSpec((tm, LANE), pos_map)]
-        args += [cos, sin]
+            spec = pl.BlockSpec((tm, LANE), lambda i: (i % (seq // tm), 0))
+            inputs += [(rope.cos, spec), (rope.sin, spec)]
 
-    def kernel(x_ref, nw_ref, nb_ref, w_ref, b_ref, *rest):
-        if rope is not None:
-            cos_ref, sin_ref, o_ref = rest
-        else:
-            o_ref = rest[0]
-        xv = x_ref[...].astype(F32)
-        xn = (_layer_norm(xv, nw_ref[...], nb_ref[...], eps) if normalize else xv).astype(w_ref.dtype)
-        for j in range(chunks):
-            cols = slice(j * tn, (j + 1) * tn)
-            y = (jnp.dot(xn, w_ref[:, cols], preferred_element_type=F32) + b_ref[:, cols].astype(F32)).astype(o_ref.dtype)
-            if rope is not None and j < rope_blocks:
-                y = _rope(y, cos_ref[...], sin_ref[...])
-            o_ref[:, cols] = y
+    def kernel(*refs: Ref) -> None:
+        x_ref, nw_ref, nb_ref, w_ref, b_ref, *rope_refs, o_ref = refs
+        tables = (rope_refs[0][...], rope_refs[1][...]) if rope_refs else None
+        _norm_project(x_ref[...].astype(F32), nw_ref, nb_ref, w_ref, b_ref, o_ref, eps=eps, normalize=normalize, tn=tn, rope=tables, rope_blocks=rope_blocks)
 
-    return pl.pallas_call(  # type: ignore[no-any-return]
-        kernel,
-        out_shape=jax.ShapeDtypeStruct((rows, n), out_dtype),
-        grid_spec=pl.GridSpec(grid=(rows // tm,), in_specs=in_specs, out_specs=pl.BlockSpec((tm, n), lambda i: (i, 0))),
-        compiler_params=pltpu.CompilerParams(dimension_semantics=("parallel",), vmem_limit_bytes=VMEM_LIMIT),
-        name="norm_linear_rope" if rope is not None else "norm_linear",
-    )(*args)
-
-
-def _gelu(a: jax.Array) -> jax.Array:  # exact (erf) GELU, as nn.GELU / jax.nn.gelu(approximate=False)
-    return 0.5 * a * (1.0 + jax.lax.erf(a * (1.0 / math.sqrt(2.0))))
+    return _row_call(kernel, inputs, (rows, n), jnp.bfloat16, tm, "norm_linear_rope" if rope is not None else "norm_linear")
 
 
 def out_mlp(
@@ -157,205 +226,116 @@ def out_mlp(
     b2: jax.Array,
     *,
     act: str,
-    tm: int | None = None,
 ) -> jax.Array:
-    """y = att @ wo_t + bo + x;  out = y + act(LN(y) @ wi_t + bi) @ wo2_t + b2   ([R, D] fp32).
+    """y = att @ wo_t + bo + x, then y + act(LayerNorm(y) @ wi_t + bi) @ wo2_t + b2: [R, D] fp32.
 
-    act = "gated_gelu": wi_t is [D, 2 * Fp], gelu(h[:, :Fp]) * h[:, Fp:] (Fp a multiple of 128; pad
-    with zero columns / rows, see `pad_gated`); act = "relu": wi_t is [D, F].
+    act="gated_gelu": wi_t [D, 2 * Fp] from `pad_gated`; act="relu": wi_t [D, F].
     """
     rows, d = x.shape
-    f = wi_t.shape[1]
-    fp = wo2_t.shape[0]
-    assert act in ("gated_gelu", "relu") and (f == 2 * fp if act == "gated_gelu" else f == fp), (act, f, fp)
-    tm = tm or _row_block(rows)
-    assert rows % tm == 0 and fp % LANE == 0, (rows, tm, fp)
+    tm = min(TM, rows)
+    _check_mlp(act, wi_t, wo2_t)
+    assert rows % tm == 0 and wo2_t.shape[0] % LANE == 0, (rows, tm, wo2_t.shape)
 
-    def kernel(att_ref, x_ref, wo_ref, bo_ref, nw_ref, nb_ref, wi_ref, bi_ref, wo2_ref, b2_ref, o_ref):
-        y = jnp.dot(att_ref[...], wo_ref[...], preferred_element_type=F32) + bo_ref[...].astype(F32) + x_ref[...]
-        z = _layer_norm(y, nw_ref[...], nb_ref[...], eps).astype(wi_ref.dtype)
-        h = jnp.dot(z, wi_ref[...], preferred_element_type=F32) + bi_ref[...].astype(F32)
-        g = _gelu(h[:, :fp]) * h[:, fp:] if act == "gated_gelu" else jnp.maximum(h, 0.0)
-        o_ref[...] = jnp.dot(g.astype(wo2_ref.dtype), wo2_ref[...], preferred_element_type=F32) + b2_ref[...].astype(F32) + y
+    inputs = [(att, _rows(tm, d)), (x, _rows(tm, d)), *_resident(wo_t, _vec(bo), _vec(norm_w), _vec(norm_b), wi_t, _vec(bi), wo2_t, _vec(b2))]
 
-    full = lambda shape: pl.BlockSpec(shape, lambda i: (0,) * len(shape))
-    return pl.pallas_call(  # type: ignore[no-any-return]
-        kernel,
-        out_shape=jax.ShapeDtypeStruct((rows, d), F32),
-        grid_spec=pl.GridSpec(
-            grid=(rows // tm,),
-            in_specs=[
-                pl.BlockSpec((tm, d), lambda i: (i, 0)),
-                pl.BlockSpec((tm, d), lambda i: (i, 0)),
-                full((d, d)),
-                full((1, d)),
-                full((1, d)),
-                full((1, d)),
-                full((d, f)),
-                full((1, f)),
-                full((fp, d)),
-                full((1, d)),
-            ],
-            out_specs=pl.BlockSpec((tm, d), lambda i: (i, 0)),
-        ),
-        compiler_params=pltpu.CompilerParams(dimension_semantics=("parallel",), vmem_limit_bytes=VMEM_LIMIT),
-        name=f"out_mlp_{act}",
-    )(att, x, wo_t, bo.reshape(1, d), norm_w.reshape(1, d), norm_b.reshape(1, d), wi_t, bi.reshape(1, f), wo2_t, b2.reshape(1, d))
+    def kernel(*refs: Ref) -> None:
+        att_ref, x_ref, wo_ref, bo_ref, *mlp_refs, o_ref = refs
+        y = _dense(att_ref[...], wo_ref[...], bo_ref[...]) + x_ref[...]
+        o_ref[...] = _mlp(y, *mlp_refs, eps=eps, act=act)
 
-
-def pad_gated(wi: jax.Array, wo2: jax.Array) -> tuple[jax.Array, jax.Array]:
-    """PyTorch-layout gated MLP weights wi [2 * Fi, D], wo2 [D, Fi] -> wi_t [D, 2 * Fp], wo2_t [Fp, D]
-    with Fi padded to a multiple of 128 (zero columns: gelu(0) * 0 = 0, so the padding adds nothing)."""
-    fi = wo2.shape[1]
-    fp = -(-fi // LANE) * LANE
-    a, b = wi[:fi], wi[fi:]
-    pad = ((0, fp - fi), (0, 0))
-    wi_t = jnp.concatenate([jnp.pad(a, pad), jnp.pad(b, pad)], 0).T
-    return wi_t, jnp.pad(wo2, ((0, 0), (0, fp - fi))).T
+    return _row_call(kernel, inputs, (rows, d), F32, tm, f"out_mlp_{act}")
 
 
 def layer(
     x: jax.Array,
     mask: jax.Array,
-    norm1_w: jax.Array,
-    norm1_b: jax.Array,
-    w_qkv_t: jax.Array,
-    b_qkv: jax.Array,
-    rope: Rope | None,
-    wo_t: jax.Array,
-    bo: jax.Array,
-    norm2_w: jax.Array,
-    norm2_b: jax.Array,
-    wi_t: jax.Array,
-    bi: jax.Array,
-    wo2_t: jax.Array,
-    b2: jax.Array,
+    w: LayerParams,
     *,
     seq: int,
     heads: int,
-    window: int,
     eps: float,
     act: str,
+    window: int = 0,
+    rope: Rope | None = None,
     normalize: bool = True,
 ) -> jax.Array:
-    """One transformer layer in one kernel, for seq <= LAYER_MAX_SEQ: x [R, D] fp32 -> x' [R, D] fp32.
+    """One pre-norm layer in a single kernel, seq <= LAYER_MAX_SEQ: x [R, D] fp32 -> [R, D] fp32.
 
-    A grid step holds tm / seq whole sequences, so the layer's intermediates never leave VMEM:
-    LayerNorm -> @ w_qkv_t (+ b_qkv) -> RoPE on the q / k heads -> per sequence and head a single-pass
-    softmax attention with the key mask and sliding window built in-kernel (scores [S, S] fit, no online
-    rescaling) -> @ wo_t + bo + x -> LayerNorm -> @ wi_t + bi -> gated GELU | ReLU -> @ wo2_t + b2 + y.
-    HBM sees x once in, x' once out and the weights once per kernel.
+    A grid step holds whole sequences, so attention is a single-pass softmax per sequence and head,
+    and HBM sees x once in, x' once out and each weight once.
     """
     rows, d = x.shape
     batch = rows // seq
-    n, f, fp = w_qkv_t.shape[1], wi_t.shape[1], wo2_t.shape[0]
+    n = w.w_qkv_t.shape[1]
     assert n == 3 * d and heads * HEAD_DIM == d and seq <= LAYER_MAX_SEQ, (n, d, heads, seq)
-    assert act in ("gated_gelu", "relu") and (f == 2 * fp if act == "gated_gelu" else f == fp), (act, f, fp)
-    nseq = min(batch, max(1, TM // seq))
+    _check_mlp(act, w.wi_t, w.wo2_t)
+    nseq = min(batch, max(1, TM // seq))  # sequences per grid step
     assert batch % nseq == 0, (batch, nseq)
     tm = nseq * seq
     scale = HEAD_DIM**-0.5
     cos, sin = (rope.cos, rope.sin) if rope is not None else (jnp.zeros((seq, LANE), F32),) * 2
 
-    def kernel(
-        x_ref,
-        m_ref,
-        n1w_ref,
-        n1b_ref,
-        wqkv_ref,
-        bqkv_ref,
-        cos_ref,
-        sin_ref,
-        wo_ref,
-        bo_ref,
-        n2w_ref,
-        n2b_ref,
-        wi_ref,
-        bi_ref,
-        wo2_ref,
-        b2_ref,
-        o_ref,
-        qkv_sc,
-        att_sc,
-    ):
-        xv = x_ref[...]
-        xn = (_layer_norm(xv, n1w_ref[...], n1b_ref[...], eps) if normalize else xv).astype(wqkv_ref.dtype)
-        for j in range(3):  # q | k | v chunks of the projection, RoPE on q and k
-            cols = slice(j * d, (j + 1) * d)
-            y = (jnp.dot(xn, wqkv_ref[:, cols], preferred_element_type=F32) + bqkv_ref[:, cols].astype(F32)).astype(qkv_sc.dtype)
-            if rope is not None and j < 2:
-                y = _rope(y, jnp.tile(cos_ref[...], (nseq, 1)), jnp.tile(sin_ref[...], (nseq, 1)))
-            qkv_sc[:, cols] = y
-
-        for s_ in range(nseq):  # attention, one sequence at a time: scores [keys, queries] per head
-            rows_ = slice(s_ * seq, (s_ + 1) * seq)
-            allowed = jnp.transpose(m_ref[s_] > 0)  # [S, 1]: key validity along the rows
-            if window:
-                kpos = jax.lax.broadcasted_iota(jnp.int32, (seq, seq), 0)
-                qpos = jax.lax.broadcasted_iota(jnp.int32, (seq, seq), 1)
-                allowed = allowed & (jnp.abs(qpos - kpos) <= window)
-            bias = jnp.broadcast_to(jnp.where(allowed, 0.0, MASK_FILL).astype(F32), (seq, seq))
-            for h in range(heads):
-                cols = slice(h * HEAD_DIM, (h + 1) * HEAD_DIM)
-                q = qkv_sc[rows_, cols]
-                k = qkv_sc[rows_, d + h * HEAD_DIM : d + (h + 1) * HEAD_DIM]
-                v = qkv_sc[rows_, 2 * d + h * HEAD_DIM : 2 * d + (h + 1) * HEAD_DIM]
-                st = jax.lax.dot_general(k, q * scale, (((1,), (1,)), ((), ())), preferred_element_type=F32) + bias
-                p = jnp.exp(st - st.max(0, keepdims=True))
-                l = p.sum(0, keepdims=True)
-                ot = jax.lax.dot_general(v, p.astype(v.dtype), (((0,), (0,)), ((), ())), preferred_element_type=F32)  # [64, S]
-                att_sc[rows_, cols] = jnp.transpose(ot / l).astype(att_sc.dtype)
-
-        y = jnp.dot(att_sc[...], wo_ref[...], preferred_element_type=F32) + bo_ref[...].astype(F32) + xv
-        z = _layer_norm(y, n2w_ref[...], n2b_ref[...], eps).astype(wi_ref.dtype)
-        h = jnp.dot(z, wi_ref[...], preferred_element_type=F32) + bi_ref[...].astype(F32)
-        g = _gelu(h[:, :fp]) * h[:, fp:] if act == "gated_gelu" else jnp.maximum(h, 0.0)
-        o_ref[...] = jnp.dot(g.astype(wo2_ref.dtype), wo2_ref[...], preferred_element_type=F32) + b2_ref[...].astype(F32) + y
-
-    full = lambda shape: pl.BlockSpec(shape, lambda i: (0,) * len(shape))
-    return pl.pallas_call(  # type: ignore[no-any-return]
-        kernel,
-        out_shape=jax.ShapeDtypeStruct((rows, d), F32),
-        grid_spec=pl.GridSpec(
-            grid=(rows // tm,),
-            in_specs=[
-                pl.BlockSpec((tm, d), lambda i: (i, 0)),
-                pl.BlockSpec((nseq, 1, seq), lambda i: (i, 0, 0)),
-                full((1, d)),
-                full((1, d)),
-                full((d, n)),
-                full((1, n)),
-                full((seq, LANE)),
-                full((seq, LANE)),
-                full((d, d)),
-                full((1, d)),
-                full((1, d)),
-                full((1, d)),
-                full((d, f)),
-                full((1, f)),
-                full((fp, d)),
-                full((1, d)),
-            ],
-            out_specs=pl.BlockSpec((tm, d), lambda i: (i, 0)),
-            scratch_shapes=[pltpu.VMEM((tm, n), w_qkv_t.dtype), pltpu.VMEM((tm, d), w_qkv_t.dtype)],
+    inputs = [
+        (x, _rows(tm, d)),
+        (mask.reshape(batch, 1, seq).astype(jnp.int32), pl.BlockSpec((nseq, 1, seq), lambda i: (i, 0, 0))),
+        *_resident(
+            _vec(w.norm1_w),
+            _vec(w.norm1_b),
+            w.w_qkv_t,
+            _vec(w.b_qkv),
+            cos,
+            sin,
+            w.wo_t,
+            _vec(w.bo),
+            _vec(w.norm2_w),
+            _vec(w.norm2_b),
+            w.wi_t,
+            _vec(w.bi),
+            w.wo2_t,
+            _vec(w.b2),
         ),
-        compiler_params=pltpu.CompilerParams(dimension_semantics=("parallel",), vmem_limit_bytes=VMEM_LIMIT),
-        name=f"layer_{act}_w{window}",
-    )(
-        x,
-        mask.reshape(batch, 1, seq).astype(jnp.int32),
-        norm1_w.reshape(1, d),
-        norm1_b.reshape(1, d),
-        w_qkv_t,
-        b_qkv.reshape(1, n),
-        cos,
-        sin,
-        wo_t,
-        bo.reshape(1, d),
-        norm2_w.reshape(1, d),
-        norm2_b.reshape(1, d),
-        wi_t,
-        bi.reshape(1, f),
-        wo2_t,
-        b2.reshape(1, d),
-    )
+    ]
+
+    def kernel(*refs: Ref) -> None:
+        x_ref, m_ref, n1w_ref, n1b_ref, wqkv_ref, bqkv_ref, cos_ref, sin_ref, wo_ref, bo_ref, *mlp_refs, o_ref, qkv_sc, att_sc = refs
+        xv = x_ref[...]
+        tables = (jnp.tile(cos_ref[...], (nseq, 1)), jnp.tile(sin_ref[...], (nseq, 1))) if rope is not None else None
+        _norm_project(xv, n1w_ref, n1b_ref, wqkv_ref, bqkv_ref, qkv_sc, eps=eps, normalize=normalize, tn=d, rope=tables, rope_blocks=2)
+
+        for s in range(nseq):  # scores transposed, [keys, queries]
+            r = slice(s * seq, (s + 1) * seq)
+            bias = mask_bias(m_ref[s], (seq, seq), window)
+            for h in range(heads):
+                q, k, v = (qkv_sc[r, head_cols(h, j * d)] for j in range(3))
+                st = scores_t(q, k, scale) + bias
+                p = jnp.exp(st - st.max(0, keepdims=True))
+                att_sc[r, head_cols(h)] = jnp.transpose(pv_t(v, p) / p.sum(0, keepdims=True)).astype(att_sc.dtype)
+
+        y = _dense(att_sc[...], wo_ref[...], bo_ref[...]) + xv
+        o_ref[...] = _mlp(y, *mlp_refs, eps=eps, act=act)
+
+    scratch = [pltpu.VMEM((tm, n), w.w_qkv_t.dtype), pltpu.VMEM((tm, d), w.w_qkv_t.dtype)]  # qkv, attention output
+    return _row_call(kernel, inputs, (rows, d), F32, tm, f"layer_{act}_w{window}", scratch)
+
+
+def encoder_layer(
+    x: jax.Array,
+    mask: jax.Array,
+    w: LayerParams,
+    *,
+    seq: int,
+    heads: int,
+    eps: float,
+    act: str,
+    window: int = 0,
+    rope: Rope | None = None,
+    normalize: bool = True,
+) -> jax.Array:
+    """Pre-norm layer on [B * S, D] fp32 rows: `layer` up to LAYER_MAX_SEQ, else
+    norm_linear -> flash_attention -> out_mlp."""
+    if seq <= LAYER_MAX_SEQ:
+        return layer(x, mask, w, seq=seq, heads=heads, eps=eps, act=act, window=window, rope=rope, normalize=normalize)
+    d = x.shape[1]
+    qkv = norm_linear(x, w.norm1_w, w.norm1_b, eps, w.w_qkv_t, w.b_qkv, normalize=normalize, rope=rope, rope_blocks=2, tn=d)
+    att = flash_attention(qkv.reshape(-1, seq, 3 * d), mask, heads=heads, window=window)
+    return out_mlp(att.reshape(-1, d), x, w.wo_t, w.bo, w.norm2_w, w.norm2_b, eps, w.wi_t, w.bi, w.wo2_t, w.b2, act=act)

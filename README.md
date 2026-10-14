@@ -80,7 +80,7 @@ torch, transformers or laya. Parity against PyTorch Laya 0.4.4 (`tests/laya/`):
 - **TPU bf16**: probabilities are within 0.02 and the argmax matches, with both the `jax` and `pallas`
   attention.
 
-`impl="auto"` still uses the XLA path; `impl="pallas"` runs the fused TPU kernels (`src/deciax/kernels/`):
+On TPU the default (`impl="auto"`) runs the fused Pallas kernels (`src/deciax/kernels/`); `impl="jax"` keeps the XLA path, which is also what `auto` means off TPU:
 
 | kernel | per encoder layer | what stays in VMEM |
 |---|---|---|

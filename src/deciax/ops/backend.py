@@ -8,10 +8,14 @@ type Impl = Literal["jax", "pallas"]
 
 
 def default_impl() -> Impl:
-    # XLA's fused attention beats the Pallas flash kernel with a dense bias on TPU at
-    # Laya's shapes (laya-tpu fusion_bench, english bf16: 2.0 vs 5.1 ms at S=512), so
-    # Pallas is opt-in until a splash kernel with local masks is faster.
-    return "jax"
+    """The fused Pallas kernels (`deciax.kernels`) on TPU, the XLA path elsewhere.
+
+    On a v6e the fused path is 2.5x faster than XLA at laya's shapes (64 x 256: 27 vs 70 ms) and
+    moves ~17x fewer HBM bytes; the kernels are TPU-only (Mosaic).
+    """
+    import jax
+
+    return "pallas" if jax.default_backend() == "tpu" else "jax"
 
 
 def resolve(impl: str) -> Impl:

@@ -4,18 +4,20 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import jax
 import jax.numpy as jnp
 from huggingface_hub import snapshot_download
 
-from deciax.models import MODELS
+from deciax.models import MODELS, ModelName
 from deciax.models.laya.model import LayaModel
 from deciax.ops.backend import ImplChoice
 from deciax.protocol.output import DecisionOutput
 from deciax.protocol.types import State, parse_questions
 from deciax.runtime.engine import Engine
+
+type DtypeChoice = Literal["auto", "bf16", "fp32"]
 
 
 class Decider:
@@ -71,10 +73,10 @@ class Decider:
 
 
 def load(
-    model: str = "laya",
+    model: ModelName = "laya",
     *,
     revision: str | None = None,
-    dtype: str = "auto",
+    dtype: DtypeChoice = "auto",
     impl: ImplChoice = "auto",
 ) -> Decider:
     """Load a registered checkpoint (see `deciax.models.MODELS`).

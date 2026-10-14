@@ -4,6 +4,7 @@ from typing import Any
 
 import pytest
 
+from deciax.models import ModelName
 from deciax.serve.app import Service
 
 QUESTIONS = {"n": {"type": "noul", "instructions": "Is it?"}}
@@ -54,8 +55,8 @@ class FakeDecider:
         return [self.decide(s, questions, **kw) for s in states]
 
 
-def make(**kw: Any) -> tuple[Service, dict[str, FakeDecider]]:
-    deciders = {
+def make(**kw: Any) -> tuple[Service, dict[ModelName, FakeDecider]]:
+    deciders: dict[ModelName, FakeDecider] = {
         "laya": FakeDecider("laya"),
         "laya-multilingual": FakeDecider("laya-multilingual"),
     }
@@ -94,7 +95,7 @@ def test_jev_strict() -> None:
         ("ml", "laya-multilingual"),
     ],
 )
-def test_model_resolution(model: str | None, served_by: str) -> None:
+def test_model_resolution(model: str | None, served_by: ModelName) -> None:
     service, _ = make()
     r = post(service, {"state": "s", "questions": QUESTIONS, "model": model})
     assert r.status == 200 and r.payload["usage"]["served_by"] == served_by

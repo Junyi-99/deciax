@@ -21,9 +21,9 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
-from deciax.models import MODELS
+from deciax.models import MODELS, ModelName
 from deciax.ops.backend import ImplChoice
 from deciax.protocol.systemone import (
     LONE_SURROGATE_DETAIL,
@@ -37,10 +37,13 @@ from deciax.protocol.systemone import (
 )
 from deciax.runtime.buckets import SEQ_BUCKETS
 
+if TYPE_CHECKING:
+    from deciax.decider import DtypeChoice
+
 log = logging.getLogger("deciax.serve")
 
 BUNDLE_REPO = "convaiinnovations/laya"
-ALIASES = {
+ALIASES: dict[str, ModelName] = {
     "english": "laya",
     "en": "laya",
     "default": "laya",
@@ -104,8 +107,8 @@ def _error(status: int, detail: str, headers: dict[str, str] | None = None) -> R
 class Service:
     def __init__(
         self,
-        deciders: Mapping[str, Decides],
-        default_model: str,
+        deciders: Mapping[ModelName, Decides],
+        default_model: ModelName,
         *,
         api_key: str | None = None,
         max_concurrent: int = 16,
@@ -168,7 +171,7 @@ class Service:
             "status": "ok",
             "loaded": sorted(self.deciders),
             "default_model": self.default_model,
-            "revisions": {name: MODELS[name].revision for name in sorted(self.deciders) if name in MODELS},
+            "revisions": {name: MODELS[name].revision for name in sorted(self.deciders)},
             "device": self.device,
         }
 
@@ -217,7 +220,7 @@ class Service:
         return Response(200, payload, _timing(ms))
 
     # -- helpers ---------------------------------------------------------------------
-    def resolve_model(self, model: Any) -> str:
+    def resolve_model(self, model: Any) -> ModelName:
         """A loaded checkpoint name for the request's `model` field.
 
         Absent, the root bundle id or an unknown id such as `jev-1` mean "let the
@@ -229,7 +232,7 @@ class Service:
 
         text = str(model).strip()
         key = text.lower()
-        published = {c.repo.lower(): name for name, c in MODELS.items() if c.repo != BUNDLE_REPO}
+        published: dict[str, ModelName] = {c.repo.lower(): name for name, c in MODELS.items() if c.repo != BUNDLE_REPO}
         name = published.get(key) or ALIASES.get(key)
 
         if name is None and key in UNAVAILABLE:
@@ -383,21 +386,21 @@ WARMUP_QUESTIONS = {"q": {"type": "noul", "instructions": "Is this a warmup requ
 def serve(
     host: str = "127.0.0.1",
     port: int = 8000,
-    models: tuple[str, ...] = ("laya",),
+    models: tuple[ModelName, ...] = ("laya",),
     *,
-    default_model: str | None = None,
+    default_model: ModelName | None = None,
     api_key: str | None = None,
     max_concurrent: int = 16,
     jev_strict: bool = False,
     warmup: bool = True,
-    dtype: str = "auto",
+    dtype: DtypeChoice = "auto",
     impl: ImplChoice = "auto",
 ) -> None:
     import jax
 
     from deciax.decider import load
 
-    deciders = {}
+    deciders: dict[ModelName, Decides] = {}
     for name in models:
         log.info("loading %s", name)
         deciders[name] = load(name, dtype=dtype, impl=impl)

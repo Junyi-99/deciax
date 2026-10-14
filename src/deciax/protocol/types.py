@@ -14,7 +14,7 @@ from typing import Any, Literal, TypedDict
 type State = str | dict[str, Any] | list[Any]
 type QuestionType = Literal["choice", "score", "noul"]
 
-QTYPES: dict[str, int] = {"choice": 0, "score": 1, "noul": 2}
+QTYPES: dict[QuestionType, int] = {"choice": 0, "score": 1, "noul": 2}
 DEFAULT_NOUL_LABELS = {"false": "false", "true": "true"}
 
 

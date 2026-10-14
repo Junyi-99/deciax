@@ -9,7 +9,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 import jax
 import jax.numpy as jnp
@@ -23,6 +23,7 @@ TM = 512  # row block
 LAYER_MAX_SEQ = 512  # longest sequence `encoder_layer` runs as a single kernel
 
 type Inputs = list[tuple[jax.Array, pl.BlockSpec]]
+type Act = Literal["gated_gelu", "relu"]
 
 
 @dataclass(frozen=True)
@@ -119,7 +120,7 @@ def _norm_project(
         o_ref[:, cols] = y
 
 
-def _mlp(y: jax.Array, nw_ref: Ref, nb_ref: Ref, wi_ref: Ref, bi_ref: Ref, wo2_ref: Ref, b2_ref: Ref, *, eps: float, act: str) -> jax.Array:
+def _mlp(y: jax.Array, nw_ref: Ref, nb_ref: Ref, wi_ref: Ref, bi_ref: Ref, wo2_ref: Ref, b2_ref: Ref, *, eps: float, act: Act) -> jax.Array:
     """y + act(LayerNorm(y) @ wi + bi) @ wo2 + b2, fp32."""
     h = _dense(_layer_norm(y, nw_ref[...], nb_ref[...], eps).astype(wi_ref.dtype), wi_ref[...], bi_ref[...])
     fp = wo2_ref.shape[0]
@@ -127,7 +128,7 @@ def _mlp(y: jax.Array, nw_ref: Ref, nb_ref: Ref, wi_ref: Ref, bi_ref: Ref, wo2_r
     return _dense(g.astype(wo2_ref.dtype), wo2_ref[...], b2_ref[...]) + y
 
 
-def _check_mlp(act: str, wi_t: jax.Array, wo2_t: jax.Array) -> None:
+def _check_mlp(act: Act, wi_t: jax.Array, wo2_t: jax.Array) -> None:
     f, fp = wi_t.shape[1], wo2_t.shape[0]
     assert act in ("gated_gelu", "relu") and f == (2 * fp if act == "gated_gelu" else fp), (act, f, fp)
 
@@ -225,7 +226,7 @@ def out_mlp(
     wo2_t: jax.Array,
     b2: jax.Array,
     *,
-    act: str,
+    act: Act,
 ) -> jax.Array:
     """y = att @ wo_t + bo + x, then y + act(LayerNorm(y) @ wi_t + bi) @ wo2_t + b2: [R, D] fp32.
 
@@ -254,7 +255,7 @@ def layer(
     seq: int,
     heads: int,
     eps: float,
-    act: str,
+    act: Act,
     window: int = 0,
     rope: Rope | None = None,
     normalize: bool = True,
@@ -326,7 +327,7 @@ def encoder_layer(
     seq: int,
     heads: int,
     eps: float,
-    act: str,
+    act: Act,
     window: int = 0,
     rope: Rope | None = None,
     normalize: bool = True,

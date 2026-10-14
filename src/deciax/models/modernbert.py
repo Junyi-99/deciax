@@ -8,7 +8,7 @@ frequencies come from the per-layer-type thetas. Port of the encoder half of lay
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal, get_args
 
 import jax
 import jax.numpy as jnp
@@ -17,16 +17,18 @@ from deciax import nn, ops
 from deciax.kernels import fused
 from deciax.ops.backend import ImplChoice
 
-DEFAULT_THETA = {"full_attention": 160000.0, "sliding_attention": 10000.0}
+type LayerType = Literal["full_attention", "sliding_attention"]
+
+DEFAULT_THETA: dict[LayerType, float] = {"full_attention": 160000.0, "sliding_attention": 10000.0}
 
 
 @dataclass(frozen=True)
 class ModernBertConfig:
     hidden_size: int
     num_attention_heads: int
-    layer_types: tuple[str, ...]
+    layer_types: tuple[LayerType, ...]
     norm_eps: float
-    rope_theta: tuple[tuple[str, float], ...]
+    rope_theta: tuple[tuple[LayerType, float], ...]
     window: int
 
     @property
@@ -40,9 +42,12 @@ class ModernBertConfig:
         layer_types = config.get("layer_types") or [
             "full_attention" if i % config.get("global_attn_every_n_layers", 3) == 0 else "sliding_attention" for i in range(n)
         ]
+        unknown = set(layer_types) - set(get_args(LayerType.__value__))
+        if unknown:
+            raise NotImplementedError(f"unsupported layer types {sorted(unknown)}")
 
         theta = dict(DEFAULT_THETA)
-        legacy = {
+        legacy: dict[LayerType, str] = {
             "full_attention": "global_rope_theta",
             "sliding_attention": "local_rope_theta",
         }

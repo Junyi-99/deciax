@@ -8,6 +8,7 @@ import pytest
 from deciax import nn
 from deciax.kernels import fused
 from deciax.kernels.attention import pallas, reference
+from deciax.kernels.fused import Act
 
 pytestmark = pytest.mark.tpu
 
@@ -22,7 +23,7 @@ def _close(got: jax.Array | np.ndarray, want: jax.Array | np.ndarray, rtol: floa
     np.testing.assert_allclose(np.asarray(got, np.float32), np.asarray(want, np.float32), rtol=rtol, atol=atol)
 
 
-def _mlp_weights(k1: jax.Array, k2: jax.Array, act: str) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
+def _mlp_weights(k1: jax.Array, k2: jax.Array, act: Act) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     """PyTorch-layout wi, wo2 and the kernel layout wi_t, wo2_t. Gated Fi = 320 is not a lane
     multiple, so it exercises `pad_gated`."""
     fi = 320 if act == "gated_gelu" else 512
@@ -52,7 +53,7 @@ def test_norm_linear_rope(normalize: bool, rows: int, seq: int) -> None:
 
 
 @pytest.mark.parametrize("act", ["gated_gelu", "relu"])
-def test_out_mlp(act: str) -> None:
+def test_out_mlp(act: Act) -> None:
     rows = 512
     ks = jax.random.split(jax.random.key(1), 9)
     att = _normal(ks[0], (rows, D), 1.0, jnp.bfloat16)
@@ -89,7 +90,7 @@ def test_flash_attention(seq: int, window: int) -> None:
 
 
 @pytest.mark.parametrize(("seq", "window", "act"), [(128, 0, "gated_gelu"), (256, 64, "gated_gelu"), (512, 0, "relu"), (64, 64, "relu")])
-def test_layer_matches_three_kernels(seq: int, window: int, act: str) -> None:
+def test_layer_matches_three_kernels(seq: int, window: int, act: Act) -> None:
     """One-kernel layer vs norm_linear -> flash_attention -> out_mlp on the same weights."""
     b = 4
     rows = b * seq

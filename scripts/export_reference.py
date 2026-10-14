@@ -19,7 +19,7 @@ from laya.common import collate_items
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-from deciax.models import MODELS
+from deciax.models import MODELS, ModelName
 
 FIXTURES = ROOT / "tests" / "fixtures"
 
@@ -148,7 +148,7 @@ TEXTS = [
 ]
 
 
-def export(name: str) -> None:
+def export(name: ModelName) -> None:
     ckpt = MODELS[name]
     agent = laya.load(ckpt.repo, device="cpu", revision=ckpt.revision)
     agent.model.eval()

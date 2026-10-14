@@ -87,12 +87,12 @@ torch, transformers or laya. Parity against PyTorch Laya 0.4.4 (`tests/laya/`):
 | `fused.norm_linear` | fp32 residual -> LayerNorm -> bf16 @ Wqkv (+ bias) -> RoPE -> bf16 | normalized rows, the whole weight |
 | `attention.pallas.flash_attention` | per query block x all heads, online softmax over key blocks; key mask and sliding window computed in-kernel | scores, probabilities, running max / sum / accumulator |
 | `fused.out_mlp` | att @ Wo + residual -> LayerNorm -> Wi -> gated GELU (ReLU in the heads) -> Wo2 + residual -> fp32 | every MLP intermediate, all three weights |
+| `fused.layer` (S <= 512) | the three above in one kernel: a grid step holds whole sequences, attention is a single-pass softmax per sequence and head | everything but x in / x' out and the weights |
 
 On a TPU v6e at laya's 50-question shape (64 rows x 256 tokens) the XLA path moves ~90 GB through HBM per
-call (every op HBM-bound) and takes 70 ms; the fused path moves ~15 GB and takes 29 ms (multilingual: 36 -> 14 ms).
-Parity with the XLA path: argmax identical, max |delta p| 0.013 on the fixture cases (`benchmarks/parity_impl.py`);
-`tests/laya/test_parity.py::test_bf16_tpu` holds for both. Profiling and sweeps: `benchmarks/hbm_traffic.py`,
-`benchmarks/attn_micro.py`, `benchmarks/scaling.py`.
+call (every op HBM-bound) and takes 70 ms; the fused path moves ~5 GB and takes 27 ms (multilingual: 36 -> 14 ms),
+1.23x more at 128 x 512 where the one-kernel layer replaces the blocked attention. Parity with the XLA path: argmax identical, max |delta p| 0.006 on the fixture cases;
+`tests/laya/test_parity.py::test_bf16_tpu` holds for both.
 
 Not yet supported:
 - the parallel option layout

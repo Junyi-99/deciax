@@ -80,7 +80,19 @@ torch, transformers or laya. Parity against PyTorch Laya 0.4.4 (`tests/laya/`):
 - **TPU bf16**: probabilities are within 0.02 and the argmax matches, with both the `jax` and `pallas`
   attention.
 
-`impl="auto"` uses XLA attention, which is faster than the Pallas flash kernel at these shapes.
+On TPU the default (`impl="auto"`) runs the fused Pallas kernels (`src/deciax/kernels/`); `impl="jax"` keeps the XLA path, which is also what `auto` means off TPU:
+
+| kernel | per encoder layer | what stays in VMEM |
+|---|---|---|
+| `fused.norm_linear` | fp32 residual -> LayerNorm -> bf16 @ Wqkv (+ bias) -> RoPE -> bf16 | normalized rows, the whole weight |
+| `attention.pallas.flash_attention` | per query block x all heads, online softmax over key blocks; key mask and sliding window computed in-kernel | scores, probabilities, running max / sum / accumulator |
+| `fused.out_mlp` | att @ Wo + residual -> LayerNorm -> Wi -> gated GELU (ReLU in the heads) -> Wo2 + residual -> fp32 | every MLP intermediate, all three weights |
+| `fused.layer` (S <= 512) | the three above in one kernel: a grid step holds whole sequences, attention is a single-pass softmax per sequence and head | everything but x in / x' out and the weights |
+
+On a TPU v6e at laya's 50-question shape (64 rows x 256 tokens) the XLA path moves ~90 GB through HBM per
+call (every op HBM-bound) and takes 70 ms; the fused path moves ~5 GB and takes 27 ms (multilingual: 36 -> 14 ms),
+1.23x more at 128 x 512 where the one-kernel layer replaces the blocked attention. Parity with the XLA path: argmax identical, max |delta p| 0.006 on the fixture cases;
+`tests/laya/test_parity.py::test_bf16_tpu` holds for both.
 
 Not yet supported:
 - the parallel option layout

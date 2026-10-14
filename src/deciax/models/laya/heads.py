@@ -17,6 +17,7 @@ import jax
 import jax.numpy as jnp
 
 from deciax import nn, ops
+from deciax.kernels import fused
 
 HEAD_DIM = 64
 HEAD_NORM_EPS = 1e-5
@@ -66,6 +67,11 @@ def decision_heads(
             jax.nn.relu(_linear(p, f"{k}.linear1", _norm(p, f"{k}.norm2", x))),
         )
 
+    return _scorer(p, x, marker_pos, marker_mask)
+
+
+def _scorer(p: dict[str, jax.Array], x: jax.Array, marker_pos: jax.Array, marker_mask: jax.Array) -> tuple[jax.Array, jax.Array]:
+    """[B, S, D] head output -> (option logits, act logits)."""
     m = jnp.take_along_axis(x, jnp.maximum(marker_pos, 0)[..., None], axis=1)
     hidden = jax.nn.gelu(_linear(p, "scorer.1", _norm(p, "scorer.0", m)), approximate=False)
     logits = jnp.where(marker_mask, _linear(p, "scorer.3", hidden)[..., 0], OPTION_MASK_FILL)
@@ -85,3 +91,55 @@ def decision_heads(
     )
 
     return logits, _linear(p, "act_head.2", hidden)
+
+
+# ---------------------------------------------------------------- fused TPU path (impl="pallas")
+
+
+def prepare_fused(p: dict[str, jax.Array], head_layers: int) -> dict[str, jax.Array]:
+    """Matmul weights transposed to [in, out]."""
+    out = {}
+    for i in range(head_layers):
+        k = f"head.layers.{i}"
+        out[f"{k}.in_projT"] = p[f"{k}.self_attn.in_proj_weight"].T
+        out[f"{k}.out_projT"] = p[f"{k}.self_attn.out_proj.weight"].T
+        out[f"{k}.linear1T"] = p[f"{k}.linear1.weight"].T
+        out[f"{k}.linear2T"] = p[f"{k}.linear2.weight"].T
+    return out
+
+
+def decision_heads_fused(
+    p: dict[str, jax.Array],
+    fp: dict[str, jax.Array],
+    x: jax.Array,
+    attention_mask: jax.Array,
+    marker_pos: jax.Array,
+    marker_mask: jax.Array,
+    qtype: jax.Array,
+    head_layers: int,
+) -> tuple[jax.Array, jax.Array]:
+    """`decision_heads` on the fused kernels."""
+    batch, seq, d = x.shape
+    x = (x + p["type_emb.weight"][qtype][:, None, :]).reshape(batch * seq, d)
+
+    for i in range(head_layers):
+        k = f"head.layers.{i}"
+        w = fused.LayerParams(
+            norm1_w=p[f"{k}.norm1.weight"],
+            norm1_b=p[f"{k}.norm1.bias"],
+            w_qkv_t=fp[f"{k}.in_projT"],
+            b_qkv=p[f"{k}.self_attn.in_proj_bias"],
+            wo_t=fp[f"{k}.out_projT"],
+            bo=p[f"{k}.self_attn.out_proj.bias"],
+            norm2_w=p[f"{k}.norm2.weight"],
+            norm2_b=p[f"{k}.norm2.bias"],
+            wi_t=fp[f"{k}.linear1T"],
+            bi=p[f"{k}.linear1.bias"],
+            wo2_t=fp[f"{k}.linear2T"],
+            b2=p[f"{k}.linear2.bias"],
+        )
+        with jax.named_scope(f"head{i}"):
+            x = fused.encoder_layer(x, attention_mask, w, seq=seq, heads=d // HEAD_DIM, eps=HEAD_NORM_EPS, act="relu")
+
+    with jax.named_scope("scorer"):
+        return _scorer(p, x.reshape(batch, seq, d), marker_pos, marker_mask)

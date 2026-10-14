@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import functools
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -13,12 +12,13 @@ import numpy as np
 
 from deciax.models import modernbert
 from deciax.models.base import EncodedRow
+from deciax.models.laya import heads
 from deciax.models.laya.calibration import Calibration
 from deciax.models.laya.config import LayaConfig
-from deciax.models.laya.heads import decision_heads
 from deciax.models.laya.input import encode_state
 from deciax.models.laya.tokenizer import LayaTokenizer
 from deciax.models.laya.weights import load_params
+from deciax.ops.backend import resolve
 from deciax.protocol.answers import softmax, to_answer
 from deciax.protocol.output import DecisionOutput
 from deciax.protocol.types import Question, State
@@ -36,21 +36,29 @@ class LayaModel:
 
         self.dtype = dtype
         self.params = load_params(path / "model.safetensors", dtype)
-        self._forward = jax.jit(functools.partial(self._apply, impl=impl))
+        self.impl = resolve(impl)
+        self.fused: dict[str, jax.Array] = {}  # weight layouts for the fused kernels
+        if self.impl == "pallas":
+            self.fused = {**modernbert.prepare_fused(self.params, self.config.encoder), **heads.prepare_fused(self.params, self.config.head_layers)}
+        self._forward = jax.jit(self._apply)
 
     def _apply(
         self,
         params: dict[str, jax.Array],
+        fused: dict[str, jax.Array],
         input_ids: jax.Array,
         attention_mask: jax.Array,
         marker_pos: jax.Array,
         marker_mask: jax.Array,
         qtype: jax.Array,
-        impl: str,
     ) -> tuple[jax.Array, jax.Array]:
-        h = modernbert.encode(params, self.config.encoder, input_ids, attention_mask, self.dtype, impl)
+        if self.impl == "pallas":
+            h = modernbert.encode_fused(params, fused, self.config.encoder, input_ids, attention_mask)
+            return heads.decision_heads_fused(params, fused, h, attention_mask, marker_pos, marker_mask, qtype, self.config.head_layers)
 
-        return decision_heads(
+        h = modernbert.encode(params, self.config.encoder, input_ids, attention_mask, self.dtype, self.impl)
+
+        return heads.decision_heads(
             params,
             h,
             attention_mask,
@@ -59,7 +67,7 @@ class LayaModel:
             qtype,
             self.config.head_layers,
             self.dtype,
-            impl,
+            self.impl,
         )
 
     def encode(
@@ -80,6 +88,7 @@ class LayaModel:
     def forward(self, arrays: Mapping[str, jax.Array]) -> tuple[jax.Array, jax.Array]:
         return self._forward(  # type: ignore[no-any-return]
             self.params,
+            self.fused,
             arrays["input_ids"],
             arrays["attention_mask"],
             arrays["marker_pos"],

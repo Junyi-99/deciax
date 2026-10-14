@@ -8,10 +8,9 @@ type Impl = Literal["jax", "pallas"]
 
 
 def default_impl() -> Impl:
-    # XLA's fused attention beats the Pallas flash kernel with a dense bias on TPU at
-    # Laya's shapes (laya-tpu fusion_bench, english bf16: 2.0 vs 5.1 ms at S=512), so
-    # Pallas is opt-in until a splash kernel with local masks is faster.
-    return "jax"
+    import jax
+
+    return "pallas" if jax.default_backend() == "tpu" else "jax"
 
 
 def resolve(impl: str) -> Impl:

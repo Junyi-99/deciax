@@ -14,6 +14,7 @@ import jax
 import jax.numpy as jnp
 
 from deciax import nn, ops
+from deciax.kernels import fused
 
 DEFAULT_THETA = {"full_attention": 160000.0, "sliding_attention": 10000.0}
 
@@ -101,3 +102,70 @@ def encode(
         x = x + _linear(p, f"{k}.mlp.Wo", jax.nn.gelu(a, approximate=False) * b)
 
     return _norm(p, "encoder.final_norm", x, cfg.norm_eps)
+
+
+# ---------------------------------------------------------------- fused TPU path (impl="pallas")
+
+
+def prepare_fused(p: dict[str, jax.Array], cfg: ModernBertConfig) -> dict[str, jax.Array]:
+    """Matmul weights transposed to [in, out], the gated MLP padded by `fused.pad_gated`."""
+    out = {}
+    for i in range(len(cfg.layer_types)):
+        k = f"encoder.layers.{i}"
+        out[f"{k}.WqkvT"] = p[f"{k}.attn.Wqkv.weight"].T
+        out[f"{k}.WoT"] = p[f"{k}.attn.Wo.weight"].T
+        out[f"{k}.WiT"], out[f"{k}.Wo2T"] = fused.pad_gated(p[f"{k}.mlp.Wi.weight"], p[f"{k}.mlp.Wo.weight"])
+    return out
+
+
+def encode_fused(
+    p: dict[str, jax.Array],
+    fp: dict[str, jax.Array],
+    cfg: ModernBertConfig,
+    input_ids: jax.Array,
+    attention_mask: jax.Array,
+) -> jax.Array:
+    """`encode` on the fused kernels; the residual stream stays fp32 [B * S, D]."""
+    batch, seq = input_ids.shape
+    d = cfg.hidden_size
+    rope = {t: fused.rope_tables(nn.rope_inv_freq(cfg.head_dim, theta), seq) for t, theta in cfg.rope_theta}
+
+    x = p["encoder.embeddings.tok_embeddings.weight"][input_ids].astype(jnp.float32)
+    x = _norm(p, "encoder.embeddings.norm", x, cfg.norm_eps).reshape(batch * seq, d)
+
+    for i, layer_type in enumerate(cfg.layer_types):
+        k = f"encoder.layers.{i}"
+        with jax.named_scope(f"layer{i}_{layer_type.split('_')[0]}"):
+            x = fused.encoder_layer(
+                x,
+                attention_mask,
+                _fused_params(p, fp, k, d),
+                seq=seq,
+                heads=cfg.num_attention_heads,
+                eps=cfg.norm_eps,
+                act="gated_gelu",
+                window=cfg.window if layer_type == "sliding_attention" else 0,
+                rope=rope[layer_type],
+                normalize=f"{k}.attn_norm.weight" in p,
+            )
+
+    return _norm(p, "encoder.final_norm", x, cfg.norm_eps).reshape(batch, seq, d)
+
+
+def _fused_params(p: dict[str, jax.Array], fp: dict[str, jax.Array], k: str, d: int) -> fused.LayerParams:
+    """ModernBERT has no biases (fp32 zeros here) and layer 0 has no attn_norm (`normalize=False`)."""
+    zeros = jnp.zeros((d,), jnp.float32)
+    return fused.LayerParams(
+        norm1_w=p.get(f"{k}.attn_norm.weight", jnp.ones((d,), jnp.float32)),
+        norm1_b=zeros,
+        w_qkv_t=fp[f"{k}.WqkvT"],
+        b_qkv=jnp.zeros((3 * d,), jnp.float32),
+        wo_t=fp[f"{k}.WoT"],
+        bo=zeros,
+        norm2_w=p[f"{k}.mlp_norm.weight"],
+        norm2_b=zeros,
+        wi_t=fp[f"{k}.WiT"],
+        bi=jnp.zeros((fp[f"{k}.WiT"].shape[1],), jnp.float32),
+        wo2_t=fp[f"{k}.Wo2T"],
+        b2=zeros,
+    )

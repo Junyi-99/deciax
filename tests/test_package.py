@@ -6,7 +6,7 @@ from deciax.models import MODELS
 
 
 def test_version() -> None:
-    assert deciax.__version__ == "0.1.1.dev2"
+    assert deciax.__version__ == "0.1.1.dev3"
 
 
 def test_registry_matches_fixture_manifest() -> None:

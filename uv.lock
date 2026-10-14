@@ -267,7 +267,7 @@ wheels = [
 
 [[package]]
 name = "deciax"
-version = "0.1.1.dev2"
+version = "0.1.1.dev3"
 source = { editable = "." }
 dependencies = [
     { name = "huggingface-hub" },

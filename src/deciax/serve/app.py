@@ -24,6 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Protocol
 
 from deciax.models import MODELS
+from deciax.ops.backend import ImplChoice
 from deciax.protocol.systemone import (
     LONE_SURROGATE_DETAIL,
     MAX_BODY_BYTES,
@@ -390,7 +391,7 @@ def serve(
     jev_strict: bool = False,
     warmup: bool = True,
     dtype: str = "auto",
-    impl: str = "auto",
+    impl: ImplChoice = "auto",
 ) -> None:
     import jax
 

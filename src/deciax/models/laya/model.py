@@ -18,7 +18,7 @@ from deciax.models.laya.config import LayaConfig
 from deciax.models.laya.input import encode_state
 from deciax.models.laya.tokenizer import LayaTokenizer
 from deciax.models.laya.weights import load_params
-from deciax.ops.backend import resolve
+from deciax.ops.backend import ImplChoice, resolve
 from deciax.protocol.answers import softmax, to_answer
 from deciax.protocol.output import DecisionOutput
 from deciax.protocol.types import Question, State
@@ -27,7 +27,7 @@ MODEL_NAME = "laya-rl-agent"
 
 
 class LayaModel:
-    def __init__(self, path: Path, dtype: jnp.dtype = jnp.bfloat16, impl: str = "auto") -> None:
+    def __init__(self, path: Path, dtype: jnp.dtype = jnp.bfloat16, impl: ImplChoice = "auto") -> None:
         self.config = LayaConfig.from_dir(path)
         self.tokenizer = LayaTokenizer(path / "tokenizer")
         self.pad_token_id = self.tokenizer.pad_token_id

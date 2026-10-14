@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import jax
 
-from deciax.ops.backend import resolve
+from deciax.ops.backend import ImplChoice, resolve
 
 
 def attention(
@@ -13,7 +13,7 @@ def attention(
     v: jax.Array,
     mask: jax.Array,
     window: int = 0,
-    impl: str = "auto",
+    impl: ImplChoice = "auto",
 ) -> jax.Array:
     """Bidirectional attention over [B, S, H, Dh]; `mask` [B, S] marks real tokens,
     `window` > 0 limits each query to keys within that distance."""

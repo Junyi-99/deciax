@@ -12,6 +12,7 @@ from huggingface_hub import snapshot_download
 
 from deciax.models import MODELS
 from deciax.models.laya.model import LayaModel
+from deciax.ops.backend import ImplChoice
 from deciax.protocol.output import DecisionOutput
 from deciax.protocol.types import State, parse_questions
 from deciax.runtime.engine import Engine
@@ -74,7 +75,7 @@ def load(
     *,
     revision: str | None = None,
     dtype: str = "auto",
-    impl: str = "auto",
+    impl: ImplChoice = "auto",
 ) -> Decider:
     """Load a registered checkpoint (see `deciax.models.MODELS`).
 

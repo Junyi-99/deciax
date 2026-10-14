@@ -15,6 +15,7 @@ import jax.numpy as jnp
 
 from deciax import nn, ops
 from deciax.kernels import fused
+from deciax.ops.backend import ImplChoice
 
 DEFAULT_THETA = {"full_attention": 160000.0, "sliding_attention": 10000.0}
 
@@ -76,7 +77,7 @@ def encode(
     input_ids: jax.Array,
     attention_mask: jax.Array,
     dtype: jnp.dtype,
-    impl: str = "auto",
+    impl: ImplChoice = "auto",
 ) -> jax.Array:
     """[B, S] token ids -> [B, S, D] final-norm hidden states (fp32)."""
     batch, seq = input_ids.shape

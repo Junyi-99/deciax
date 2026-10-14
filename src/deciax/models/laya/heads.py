@@ -18,6 +18,7 @@ import jax.numpy as jnp
 
 from deciax import nn, ops
 from deciax.kernels import fused
+from deciax.ops.backend import ImplChoice
 
 HEAD_DIM = 64
 HEAD_NORM_EPS = 1e-5
@@ -43,7 +44,7 @@ def decision_heads(
     qtype: jax.Array,
     head_layers: int,
     dtype: jnp.dtype,
-    impl: str = "auto",
+    impl: ImplChoice = "auto",
 ) -> tuple[jax.Array, jax.Array]:
     """[B, S, D] encoder states -> (option logits [B, K], act logits [B, n_act])."""
     batch, seq, d = x.shape

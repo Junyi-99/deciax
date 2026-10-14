@@ -10,6 +10,7 @@ import pytest
 
 from deciax.decider import Decider
 from deciax.models.laya.model import LayaModel
+from deciax.ops.backend import Impl
 from deciax.protocol.answers import softmax
 from deciax.protocol.output import DecisionOutput
 from deciax.protocol.types import parse_questions
@@ -94,7 +95,7 @@ def test_fp32_responses(cpu_fp32: tuple[LayaModel, dict[str, Any]]) -> None:
 @pytest.mark.tpu
 @pytest.mark.parametrize("model_name", MODELS)
 @pytest.mark.parametrize("impl", ["jax", "pallas"])
-def test_bf16_tpu(model_name: str, impl: str) -> None:
+def test_bf16_tpu(model_name: str, impl: Impl) -> None:
     model = LayaModel(checkpoint_dir(model_name), jnp.bfloat16, impl)
     assert next(iter(model.params.values())).devices().pop().platform == "tpu"
 

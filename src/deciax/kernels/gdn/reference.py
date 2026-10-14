@@ -44,6 +44,7 @@ def chunked(q: jax.Array, k: jax.Array, v: jax.Array, g: jax.Array, beta: jax.Ar
         return x.reshape(*x.shape[:2], -1, chunk_size, *x.shape[3:]).swapaxes(0, 2)
 
     qs, ks, vs, gs, bs = (chunks(x) for x in (q, k, v, g, beta))
+
     eye = jnp.eye(chunk_size, dtype=jnp.float32)
     lower = jnp.tril(jnp.ones((chunk_size, chunk_size), bool))
     strict = jnp.tril(lower, -1)
@@ -57,6 +58,7 @@ def chunked(q: jax.Array, k: jax.Array, v: jax.Array, g: jax.Array, beta: jax.Ar
         gi = jnp.cumsum(gi, axis=-1)
         decay = jnp.exp(jnp.where(lower, gi[..., :, None] - gi[..., None, :], -jnp.inf))
         kb = ki * bi[..., None]
+
         a = jnp.where(strict, -mm(kb, ki.swapaxes(-1, -2)) * decay, 0)
         # Solve the triangular system directly. A truncated power series can
         # catastrophically cancel when keys align, beta approaches one, and
@@ -69,11 +71,14 @@ def chunked(q: jax.Array, k: jax.Array, v: jax.Array, g: jax.Array, beta: jax.Ar
             lower=True,
             unit_diagonal=True,
         )
+
         value = mm(inverse, vi * bi[..., None])
         cumulative_key = mm(inverse, kb * jnp.exp(gi)[..., None])
         value = value - mm(cumulative_key, state)
+
         out = mm(qi * jnp.exp(gi)[..., None], state) + mm(mm(qi, ki.swapaxes(-1, -2)) * decay, value)
         next_state = state * jnp.exp(gi[..., -1, None, None]) + mm((ki * jnp.exp(gi[..., -1, None] - gi)[..., None]).swapaxes(-1, -2), value)
+
         return next_state, out
 
     _, output = jax.lax.scan(step, state, (qs, ks, vs, gs, bs))

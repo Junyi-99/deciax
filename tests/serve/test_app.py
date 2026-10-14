@@ -213,10 +213,13 @@ def test_clef_alias_budget_and_text_only() -> None:
     fake = FakeDecider("clef")
     fake.model = SimpleNamespace(max_token_budget=16384)  # type: ignore[attr-defined]
     service = Service({"clef": fake}, "clef")
+
     assert service.resolve_model("Cloudflare/clef") == "clef"
+
     result = post(service, {"state": "s", "questions": QUESTIONS, "max_len": 16384})
     assert result.status == 200
     assert fake.calls[-1]["max_len"] == 16384
+
     assert post(service, {"state": "s", "questions": QUESTIONS, "max_len": 16385}).status == 422
     assert post(service, {"state": "s", "questions": QUESTIONS, "images": []}).status == 422
 
@@ -229,7 +232,9 @@ def test_clef_request_limits_are_used_for_single_and_batch() -> None:
     fake = FakeDecider("clef")
     fake.model = SimpleNamespace(request_limits=ClefModel.request_limits)  # type: ignore[attr-defined]
     service = Service({"clef": fake}, "clef")
+
     questions = {"intent": {"type": "choice", "criteria": {str(i): str(i) for i in range(151)}}}
     state = "x" * 50001
+
     assert post(service, {"state": state, "questions": questions}).status == 200
     assert post(service, {"states": [state], "questions": questions}, "/v1/systemone/batch").status == 200

@@ -20,6 +20,7 @@ def test_chunked_matches_recurrence(length: int) -> None:
     q, k, v = [jnp.asarray(rng.normal(size=(2, length, 3, 8)), jnp.float32) for _ in range(3)]
     g = -jnp.asarray(rng.uniform(0, 3, (2, length, 3)), jnp.float32)
     beta = jnp.asarray(rng.uniform(0, 1, (2, length, 3)), jnp.float32)
+
     np.testing.assert_allclose(chunked(q, k, v, g, beta), recurrent(q, k, v, g, beta), atol=2e-6, rtol=2e-5)
 
 
@@ -28,11 +29,13 @@ def test_blocked_attention_matches_dense() -> None:
     q = jnp.asarray(rng.normal(size=(2, 139, 4, 8)), jnp.float32)
     k, v = [jnp.asarray(rng.normal(size=(2, 139, 2, 8)), jnp.float32) for _ in range(2)]
     mask = jnp.arange(139)[None] < jnp.array([139, 97])[:, None]
+
     keys, values = [jnp.repeat(x, 2, axis=2) for x in (k, v)]
     logits = jnp.einsum("bqhd,bkhd->bhqk", q, keys) * 8**-0.5
     causal = jnp.arange(139)[:, None] >= jnp.arange(139)[None, :]
     logits = jnp.where(mask[:, None, None, :] & causal, logits, -1e30)
     expected = jnp.einsum("bhqk,bkhd->bqhd", jax.nn.softmax(logits, -1), values)
+
     np.testing.assert_allclose(attention(q, k, v, mask, causal=True), expected, atol=1e-6, rtol=1e-5)
 
 
@@ -62,18 +65,22 @@ def test_text_backbone_matches_transformers() -> None:
     c._attn_implementation = "eager"
     model: Any = Qwen3_5TextModel(c)
     model.eval()
+
     config = TextConfig.from_dict(c.to_dict())
     ids = torch.randint(0, 100, (2, 130))
     mask = torch.ones_like(ids)
     mask[1, 99:] = 0
+
     with torch.no_grad():
         expected = model(ids, attention_mask=mask, use_cache=False).last_hidden_state.numpy()
         h = jnp.asarray(model.embed_tokens(ids).numpy())
+
     weights = model.state_dict()
     for i, kind in enumerate(config.layer_types):
         prefix = f"layers.{i}."
         params = layer_weights({k[len(prefix) :]: v.numpy() for k, v in weights.items() if k.startswith(prefix)}, config)
         h = layer(jax.tree.map(jnp.asarray, params), h, jnp.asarray(mask.numpy(), bool), config=config, linear_attention=kind == "linear_attention")
+
     actual = np.asarray(rms(h, jnp.asarray(weights["norm.weight"].numpy()), config.rms_norm_eps))
     valid = mask.numpy().astype(bool)
     np.testing.assert_allclose(actual[valid], expected[valid], atol=3e-6, rtol=3e-5)
@@ -86,7 +93,9 @@ def test_aligned_keys_with_weak_decay_are_stable() -> None:
     v = jnp.ones_like(q)
     g = jnp.full((1, 130, 2), -1e-5, jnp.float32)
     beta = jnp.full(g.shape, 0.996, jnp.bfloat16)
+
     actual = jax.jit(chunked)(q, k, v, g, beta).astype(jnp.float32)
     expected = recurrent(q, k, v, g, beta).astype(jnp.float32)
+
     assert np.isfinite(actual).all()
     np.testing.assert_allclose(actual, expected, atol=1e-3, rtol=1e-3)

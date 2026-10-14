@@ -33,16 +33,20 @@ class ClefModel:
         self.name = name
         self.config = TextConfig.from_dict(json.loads((path / "config.json").read_text()))
         self.tokenizer = Tokenizer.from_file(str(path / "tokenizer.json"))
+
         pad_id = self.tokenizer.token_to_id("<|endoftext|>")
         if pad_id is None:
             raise ValueError("missing pad token")
         self.pad_token_id: int = pad_id
+
         devices = jax.local_devices()
         if len(devices) not in (1, 2, 4):
             raise ValueError("Clef supports one host with 1, 2, or 4 local devices")
         self.mesh = Mesh(np.asarray(devices), ("tp",))
         self.replicated = NamedSharding(self.mesh, P())  # type: ignore[no-untyped-call]  # JAX PartitionSpec lacks annotations.
+
         self.top, self.layers, self.head = weights.load(path, self.config, dtype, self.mesh)
+
         self._embed = jax.jit(lambda w, ids: w[ids], out_shardings=self.replicated)
         self._layer = jax.jit(text.layer, static_argnames=("config", "linear_attention"), out_shardings=self.replicated)
         cfg = json.loads((path / "joint_head_config.json").read_text())
@@ -51,6 +55,7 @@ class ClefModel:
         )
         self._norm = jax.jit(lambda h, w: text.rms(h, w, self.config.rms_norm_eps))
         self._lexical = jax.jit(lambda w, ids, spans: head.means(w[ids], spans), out_shardings=self.replicated)
+
         self._lock = threading.Lock()
 
     def build_engine(self) -> ClefModel:
@@ -58,11 +63,14 @@ class ClefModel:
 
     def forward(self, arrays: Mapping[str, NDArray[Any]]) -> jax.Array:
         a = jax.tree.map(lambda v: jax.device_put(v, self.replicated), arrays)
+
         h = self._embed(self.top["embedding"], a["input_ids"])
         for kind, params in zip(self.config.layer_types, self.layers, strict=True):
             h = self._layer(params, h, a["mask"], config=self.config, linear_attention=kind == "linear_attention")
+
         h = self._norm(h, self.top["norm"])
         lexical = self._lexical(self.top["lm_head"], a["lexical_ids"], a["lexical_spans"])
+
         return self._head(self.head, h, lexical, a)  # type: ignore[no-any-return]
 
     def decide_batch(
@@ -70,12 +78,15 @@ class ClefModel:
     ) -> list[dict[str, Any]]:
         if head_max_len is not None:
             raise ValueError("Clef has one joint token budget; head_max_len is unsupported")
+
         records = [encode(self.tokenizer, s, questions, self.max_token_budget if max_len is None else max_len) for s in states]
         results: list[dict[str, Any]] = []
+
         # Bound activation memory independently of the HTTP batch length.
         for start in range(0, len(records), 2):
             part = records[start : start + 2]
             with self._lock:
                 logits = np.asarray(self.forward(collate(part, self.pad_token_id)), np.float32)
             results.extend(decode(r, logits[i], questions, self.name) for i, r in enumerate(part))
+
         return results

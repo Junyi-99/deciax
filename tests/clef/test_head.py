@@ -14,11 +14,14 @@ def test_joint_head_matches_cloudflare_with_mixed_schema_padding() -> None:
         arrays = {k.removeprefix("array."): jnp.asarray(v) for k, v in fixture.items() if k.startswith("array.")}
         hidden = jnp.asarray(fixture["hidden"])
         lexical = means(jnp.asarray(fixture["embedding"])[arrays["lexical_ids"]], arrays["lexical_spans"])
+
         apply = jax.jit(forward, static_argnames=("heads", "routing_layers", "layers"))
         output = np.asarray(apply(params, hidden, lexical, arrays, heads=4, routing_layers=2, layers=2))
+
         for i in range(3):
             expected = fixture[f"expected.{i}"]
             np.testing.assert_allclose(output[i, : len(expected)], expected, atol=3e-6, rtol=3e-5)
+
         # Padding state cannot leak into genuine fields/options.
         changed = jnp.where(arrays["mask"][..., None], hidden, 10000.0)
         second = np.asarray(apply(params, changed, lexical, arrays, heads=4, routing_layers=2, layers=2))

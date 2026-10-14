@@ -33,8 +33,10 @@ def options(question: Mapping[str, Any]) -> list[tuple[str, Any]]:
         criteria = {"true": "The proposition is true or the answer is yes.", "false": "The proposition is false or the answer is no."}
         criteria.update(question.get("criteria") or {})
         return [(k, criteria[k]) for k in ("true", "false")]
+
     if question["type"] == "choice":
         return sorted((str(k), v) for k, v in question["criteria"].items())
+
     return [(str(i), v) for i, v in enumerate(question["criteria"])]
 
 
@@ -58,14 +60,17 @@ def validate_questions(questions: Mapping[Any, Any]) -> None:
         raise ValueError("Clef requires at least one question")
     if len(questions) > 64:
         raise ValueError("Clef supports at most 64 questions per request")
+
     total = 0
     for qid, q in questions.items():
         if not isinstance(qid, str) or not qid:
             raise ValueError("Clef question ids must be nonempty strings")
         if not isinstance(q, Mapping) or not isinstance(q.get("type"), str) or q.get("type") not in QTYPES:
             raise ValueError(f"{qid}: type must be noul, choice, or score")
+
         if any(k in q for k in ("labels", "option_order")):
             raise ValueError(f"{qid}: Clef does not support labels or option_order")
+
         criteria = q.get("criteria")
         if q["type"] == "choice" and (not isinstance(criteria, dict) or not criteria):
             raise ValueError(f"{qid}: choice criteria must be a nonempty object")
@@ -73,7 +78,9 @@ def validate_questions(questions: Mapping[Any, Any]) -> None:
             raise ValueError(f"{qid}: score criteria must be a nonempty list")
         if q["type"] == "noul" and criteria is not None and (not isinstance(criteria, dict) or not set(criteria) <= {"true", "false"}):
             raise ValueError(f"{qid}: noul criteria must use true/false keys")
+
         total += len(options(q))
+
     if total > 512:
         raise ValueError("Clef supports at most 512 total options per request")
 
@@ -94,6 +101,7 @@ def encode(tokenizer: Tokenizer, state: Any, questions: Mapping[str, Any], max_l
         instruction = q.get("instructions")
         schema += tokens(render(str(qid) if instruction is None or instruction == "" else instruction))
         span = (start, len(schema))
+
         schema += tokens("\nALLOWED OPTIONS:\n")
         spans, ids = [], []
         for j, (oid, description) in enumerate(options(q)):
@@ -106,18 +114,23 @@ def encode(tokenizer: Tokenizer, state: Any, questions: Mapping[str, Any], max_l
             spans.append((start, len(schema)))
             ids.append(oid)
             schema += tokens("\n")
+
         schema += tokens("END FIELD\n")
         fields.append(Field(qid, QTYPES[q["type"]], span, tuple(spans), tuple(ids)))
+
     prefix = tokens(f"<|im_start|>system\n{SYSTEM_PROMPT}<|im_end|>\n<|im_start|>user\nSTATE:\n")
     suffix = tokens("\n<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nJOINT SCHEMA DECISIONS:")
+
     fixed = len(prefix) + len(schema) + len(suffix)
     if fixed > max_length:
         raise ValueError(f"schema requires {fixed} tokens before state; maximum is {max_length}")
+
     state_ids = tokens(render(state))[: max_length - fixed]
     offset = len(prefix) + len(state_ids)
     shifted = tuple(
         Field(f.id, f.kind, (f.span[0] + offset, f.span[1] + offset), tuple((s + offset, e + offset) for s, e in f.option_spans), f.option_ids) for f in fields
     )
+
     return Record(tuple(prefix + state_ids + schema + suffix), shifted)
 
 
@@ -129,6 +142,7 @@ def collate(records: Sequence[Record], pad_id: int) -> dict[str, NDArray[Any]]:
     o = bucket(max(sum(len(f.option_ids) for f in r.fields) for r in records), SCHEMA_BUCKETS)
     lex = [tuple(t for f in r.fields for start, end in f.option_spans for t in r.ids[start:end]) for r in records]
     lexical_length = bucket(max(map(len, lex)), SEQUENCE_BUCKETS)
+
     arrays = {
         "lexical_ids": np.full((b, lexical_length), pad_id, np.int32),
         "lexical_spans": np.zeros((b, o, 2), np.int32),
@@ -141,10 +155,12 @@ def collate(records: Sequence[Record], pad_id: int) -> dict[str, NDArray[Any]]:
         "option_mask": np.zeros((b, o), bool),
         "option_field": np.zeros((b, o), np.int32),
     }
+
     for i, record in enumerate(records):
         arrays["input_ids"][i, : len(record.ids)] = record.ids
         arrays["mask"][i, : len(record.ids)] = True
         arrays["lexical_ids"][i, : len(lex[i])] = lex[i]
+
         lexical_offset = 0
         j = 0
         for k, f in enumerate(record.fields):
@@ -159,6 +175,7 @@ def collate(records: Sequence[Record], pad_id: int) -> dict[str, NDArray[Any]]:
                 arrays["lexical_spans"][i, j + t] = (lexical_offset, lexical_offset + end - start)
                 lexical_offset += end - start
             j += n
+
     return arrays
 
 
@@ -172,6 +189,7 @@ def decode(record: Record, logits: NDArray[Any], questions: Mapping[str, Any], m
         p = np.exp(values - values.max())
         p /= p.sum()
         probs = dict(zip(f.option_ids, p.tolist(), strict=True))
+
         q = questions[f.id]
         if f.kind == 0:
             answer: dict[str, Any] = {"type": "noul", "noul": round(probs["true"], 4)}
@@ -188,6 +206,8 @@ def decode(record: Record, logits: NDArray[Any], questions: Mapping[str, Any], m
                 "legend": dict(zip(keys, q["criteria"], strict=True)),
                 "probabilities": {k: round(probs[k], 4) for k in keys},
             }
+
         answers[f.id] = answer
         offset += n
+
     return {"model": model_name, "answers": answers, "usage": {"input_tokens": len(record.ids), "output_tokens": 0}}

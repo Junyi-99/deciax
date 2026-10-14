@@ -22,9 +22,11 @@ def tensors(path: Path) -> Iterator[tuple[str, NDArray[Any]]]:
     # Have safetensors validate offsets/shapes before mapping BF16 with ml_dtypes.
     with safe_open(path, framework="numpy"):
         pass
+
     with open(path, "rb") as f:
         size = struct.unpack("<Q", f.read(8))[0]
         header = json.loads(f.read(size))
+
     types = {"BF16": ml_dtypes.bfloat16, "F32": np.float32, "F16": np.float16}
     for key, entry in header.items():
         if key == "__metadata__":
@@ -45,6 +47,7 @@ def layer_weights(raw: Mapping[str, NDArray[Any]], c: TextConfig) -> dict[str, N
                 out["mixer." + part + suffix] = array
         else:
             out[name] = value
+
     return out
 
 
@@ -69,6 +72,7 @@ def load(path: Path, config: TextConfig, dtype: DTypeLike, mesh: Mesh) -> tuple[
     layers: list[dict[str, jax.Array]] = [{} for _ in config.layer_types]
     top: dict[str, jax.Array] = {}
     index = json.loads((path / "model.safetensors.index.json").read_text())["weight_map"]
+
     for filename in sorted(set(index.values())):
         for key, value in tensors(path / filename):
             if key.startswith("model.visual."):
@@ -85,7 +89,9 @@ def load(path: Path, config: TextConfig, dtype: DTypeLike, mesh: Mesh) -> tuple[
                     layers[int(number)][n] = put(v, spec(n, v))
             else:
                 raise ValueError(f"unexpected backbone tensor: {key}")
+
     if set(top) != {"lm_head", "embedding", "norm"} or any(not p for p in layers):
         raise ValueError("incomplete Clef text checkpoint")
+
     head = {key: put(v, P()) for key, v in tensors(path / "joint_head.safetensors")}  # type: ignore[no-untyped-call]  # JAX PartitionSpec lacks annotations.
     return top, layers, head

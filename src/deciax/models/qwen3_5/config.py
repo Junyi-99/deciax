@@ -36,12 +36,14 @@ class TextConfig:
             self.linear_value_head_dim,
             self.linear_conv_kernel_dim,
         )
+
         if any(size <= 0 for size in sizes):
             raise ValueError("Qwen3.5 dimensions must be positive")
         if self.num_attention_heads % self.num_key_value_heads or self.linear_num_value_heads % self.linear_num_key_heads:
             raise ValueError("Qwen3.5 query/value heads must divide into key head groups")
         if not self.layer_types or set(self.layer_types) - {"linear_attention", "full_attention"}:
             raise ValueError("unsupported Qwen3.5 layer types")
+
         rotary = int(self.head_dim * self.partial_rotary_factor)
         if rotary <= 0 or rotary % 2 or rotary > self.head_dim:
             raise ValueError("invalid partial rotary dimension")
@@ -55,10 +57,13 @@ class TextConfig:
             raise ValueError("only dense Qwen3.5 models are supported")
         if len(c["layer_types"]) != c["num_hidden_layers"]:
             raise ValueError("layer_types does not match num_hidden_layers")
+
         rope = c["rope_parameters"]
         if rope.get("rope_type", "default") != "default":
             raise ValueError("only default RoPE is supported")
+
         keys = [k for k in cls.__dataclass_fields__ if k not in {"layer_types", "rope_theta", "partial_rotary_factor"}]
+
         return cls(
             **{k: c[k] for k in keys},
             layer_types=tuple(c["layer_types"]),

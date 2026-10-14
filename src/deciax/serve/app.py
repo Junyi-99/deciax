@@ -185,6 +185,7 @@ class Service:
 
         state, questions = body.get("state"), body["questions"]
         decider = self.deciders[self.resolve_model(body.get("model"))]
+
         limits = getattr(getattr(decider, "model", None), "request_limits", RequestLimits())
         check_request_limits(state, questions, limits)
         _refuse_controls(body, UNSUPPORTED)
@@ -206,6 +207,7 @@ class Service:
 
         states, questions = body["states"], body["questions"]
         decider = self.deciders[self.resolve_model(body.get("model"))]
+
         limits = getattr(getattr(decider, "model", None), "request_limits", RequestLimits())
         check_batch_limits(states, questions, limits)
         _refuse_controls(body, UNSUPPORTED + UNSUPPORTED_BATCH)

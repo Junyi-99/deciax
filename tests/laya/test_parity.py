@@ -16,9 +16,8 @@ from deciax.protocol.answers import softmax
 from deciax.protocol.output import DecisionOutput
 from deciax.protocol.types import parse_questions
 from deciax.runtime.engine import Engine
-from tests.conftest import checkpoint_dir, laya_fixture
+from tests.conftest import LAYA_MODELS, checkpoint_dir, laya_fixture
 
-MODELS: list[ModelName] = ["laya", "laya-multilingual"]
 BF16_PROB_TOLERANCE = 0.02  # laya-tpu's acceptance: probability max-abs error vs PyTorch fp32
 ROUNDING = 2e-4  # answers are rounded to 4 dp; fp32 noise can flip the last digit
 
@@ -43,7 +42,7 @@ def _close(got: Any, want: Any, path: str = "") -> None:
         assert got == want, (path, got, want)
 
 
-@pytest.fixture(scope="module", params=MODELS)
+@pytest.fixture(scope="module", params=LAYA_MODELS)
 def cpu_fp32(
     request: pytest.FixtureRequest,
 ) -> Iterator[tuple[LayaModel, dict[str, Any]]]:
@@ -94,7 +93,7 @@ def test_fp32_responses(cpu_fp32: tuple[LayaModel, dict[str, Any]]) -> None:
 
 
 @pytest.mark.tpu
-@pytest.mark.parametrize("model_name", MODELS)
+@pytest.mark.parametrize("model_name", LAYA_MODELS)
 @pytest.mark.parametrize("impl", ["jax", "pallas"])
 def test_bf16_tpu(model_name: ModelName, impl: Impl) -> None:
     model = LayaModel(checkpoint_dir(model_name), jnp.bfloat16, impl)

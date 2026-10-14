@@ -3,25 +3,23 @@
     uv sync --group reference
     uv run python scripts/export_reference.py
 
-For each registered checkpoint, writes tests/fixtures/laya/<model>.json with:
+For each registered Laya checkpoint, writes tests/fixtures/laya/<model>.json with:
 - tokenizer cases: AutoTokenizer ids for raw texts;
 - request cases: per-row input_ids / marker_pos from `Agent._encode_state`, fp32
   option and act logits from the PyTorch model, and the `system_one` response.
 """
 
 import json
-import sys
 from pathlib import Path
 
 import laya
 import torch
 from laya.common import collate_items
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
 from deciax.models import MODELS, ModelName
 
-FIXTURES = ROOT / "tests" / "fixtures"
+FIXTURES = Path(__file__).resolve().parents[1] / "tests" / "fixtures"
+LAYA_MODELS: list[ModelName] = [name for name, c in MODELS.items() if c.family == "laya"]
 
 TICKET = {
     "user": "I was charged twice for my subscription this month, please fix it ASAP.",
@@ -205,12 +203,12 @@ def export(name: ModelName) -> None:
 
 def main() -> None:
     torch.set_num_threads(8)
-    for name in MODELS:
+    for name in LAYA_MODELS:
         export(name)
 
     manifest_path = FIXTURES / "manifest.json"
     manifest = json.loads(manifest_path.read_text())
-    manifest["fixtures"] = sorted(f"laya/{name}.json" for name in MODELS)
+    manifest["fixtures"] = sorted(f"laya/{name}.json" for name in LAYA_MODELS)
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
 
 

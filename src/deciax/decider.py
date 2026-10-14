@@ -1,4 +1,4 @@
-"""Public entry point: encode a request, run the engine, decode typed answers."""
+"""Public entry point: load a registered checkpoint and answer `system_one` requests."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ class Decider:
         max_len: int | None = None,
         head_max_len: int | None = None,
     ) -> dict[str, Any]:
-        """Answer every question about one state (Laya `system_one` response).
+        """Answer every question about one state (a `system_one` response).
 
         `max_len` / `head_max_len` override the checkpoint's token budgets.
         """
@@ -79,11 +79,8 @@ def load(
     if ckpt.family == "laya":
         return Decider(LayaModel(path, jdtype, impl))
 
-    if ckpt.family == "clef":
-        if impl not in ("auto", "jax"):
-            raise ValueError("Clef currently supports auto/jax kernels")
-        from deciax.models.clef.model import ClefModel
+    if impl not in ("auto", "jax"):
+        raise ValueError("Clef currently supports auto/jax kernels")
+    from deciax.models.clef.model import ClefModel
 
-        return Decider(ClefModel(path, jdtype, model))
-
-    raise ValueError(f"unsupported model family: {ckpt.family}")
+    return Decider(ClefModel(path, jdtype, model))

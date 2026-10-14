@@ -19,9 +19,9 @@ class TextConfig:
     linear_value_head_dim: int
     linear_conv_kernel_dim: int
     layer_types: tuple[LayerType, ...]
-    rms_norm_eps: float = 1e-6
-    rope_theta: float = 10000000.0
-    partial_rotary_factor: float = 0.25
+    rms_norm_eps: float
+    rope_theta: float
+    partial_rotary_factor: float
 
     def __post_init__(self) -> None:
         sizes = (

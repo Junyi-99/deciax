@@ -12,12 +12,18 @@ import jax.numpy as jnp
 
 
 def l2norm(x: jax.Array) -> jax.Array:
-    return (x.astype(jnp.float32) * jax.lax.rsqrt(jnp.sum(x.astype(jnp.float32) ** 2, -1, keepdims=True) + 1e-6)).astype(x.dtype)
+    x32 = x.astype(jnp.float32)
+    return (x32 * jax.lax.rsqrt(jnp.sum(x32 * x32, -1, keepdims=True) + 1e-6)).astype(x.dtype)
+
+
+def _normalize_qk(q: jax.Array, k: jax.Array) -> tuple[jax.Array, jax.Array]:
+    """L2-normalized fp32 q (also scaled by 1/sqrt(Dk)) and k."""
+    return l2norm(q).astype(jnp.float32) * q.shape[-1] ** -0.5, l2norm(k).astype(jnp.float32)
 
 
 def recurrent(q: jax.Array, k: jax.Array, v: jax.Array, g: jax.Array, beta: jax.Array) -> jax.Array:
     dtype = q.dtype
-    q, k = l2norm(q).astype(jnp.float32) * q.shape[-1] ** -0.5, l2norm(k).astype(jnp.float32)
+    q, k = _normalize_qk(q, k)
     state = jnp.zeros((q.shape[0], q.shape[2], q.shape[3], v.shape[3]), jnp.float32)
 
     def step(state: jax.Array, xs: tuple[jax.Array, ...]) -> tuple[jax.Array, jax.Array]:
@@ -33,7 +39,7 @@ def recurrent(q: jax.Array, k: jax.Array, v: jax.Array, g: jax.Array, beta: jax.
 
 def chunked(q: jax.Array, k: jax.Array, v: jax.Array, g: jax.Array, beta: jax.Array, chunk_size: int = 64) -> jax.Array:
     dtype, length = q.dtype, q.shape[1]
-    q, k = l2norm(q).astype(jnp.float32) * q.shape[-1] ** -0.5, l2norm(k).astype(jnp.float32)
+    q, k = _normalize_qk(q, k)
     pad = (-length) % chunk_size
 
     def chunks(x: jax.Array) -> jax.Array:
@@ -58,8 +64,9 @@ def chunked(q: jax.Array, k: jax.Array, v: jax.Array, g: jax.Array, beta: jax.Ar
         gi = jnp.cumsum(gi, axis=-1)
         decay = jnp.exp(jnp.where(lower, gi[..., :, None] - gi[..., None, :], -jnp.inf))
         kb = ki * bi[..., None]
+        eg, kt = jnp.exp(gi), ki.swapaxes(-1, -2)
 
-        a = jnp.where(strict, -mm(kb, ki.swapaxes(-1, -2)) * decay, 0)
+        a = jnp.where(strict, -mm(kb, kt) * decay, 0)
         # Solve the triangular system directly. A truncated power series can
         # catastrophically cancel when keys align, beta approaches one, and
         # decay approaches zero (observed in Clef layer 44).
@@ -73,10 +80,10 @@ def chunked(q: jax.Array, k: jax.Array, v: jax.Array, g: jax.Array, beta: jax.Ar
         )
 
         value = mm(inverse, vi * bi[..., None])
-        cumulative_key = mm(inverse, kb * jnp.exp(gi)[..., None])
+        cumulative_key = mm(inverse, kb * eg[..., None])
         value = value - mm(cumulative_key, state)
 
-        out = mm(qi * jnp.exp(gi)[..., None], state) + mm(mm(qi, ki.swapaxes(-1, -2)) * decay, value)
+        out = mm(qi * eg[..., None], state) + mm(mm(qi, kt) * decay, value)
         next_state = state * jnp.exp(gi[..., -1, None, None]) + mm((ki * jnp.exp(gi[..., -1, None] - gi)[..., None]).swapaxes(-1, -2), value)
 
         return next_state, out

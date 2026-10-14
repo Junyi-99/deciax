@@ -1,6 +1,9 @@
 import pytest
 
 from deciax.protocol.systemone import (
+    MAX_CHOICE_OPTIONS,
+    MAX_QUESTIONS,
+    MAX_STATE_CHARS,
     RequestError,
     add_jev_confidence,
     check_request_limits,
@@ -77,10 +80,10 @@ def test_project_jev_strict() -> None:
     [
         (None, {}, 400),
         ("s", [], 400),
-        ("s", {f"q{i}": {} for i in range(65)}, 413),
-        ("s", {"q": {"type": "choice", "criteria": list(range(101))}}, 413),
+        ("s", {f"q{i}": {} for i in range(MAX_QUESTIONS + 1)}, 413),
+        ("s", {"q": {"type": "choice", "criteria": list(range(MAX_CHOICE_OPTIONS + 1))}}, 413),
         ("s", {"q": {"type": "score", "criteria": ["a", None]}}, 422),
-        ("x" * 50001, {}, 413),
+        ("x" * (MAX_STATE_CHARS + 1), {}, 413),
     ],
 )
 def test_request_limits(state: object, questions: object, status: int) -> None:

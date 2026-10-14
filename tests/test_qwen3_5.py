@@ -26,13 +26,14 @@ def test_chunked_matches_recurrence(length: int) -> None:
 
 def test_blocked_attention_matches_dense() -> None:
     rng = np.random.default_rng(3)
-    q = jnp.asarray(rng.normal(size=(2, 139, 4, 8)), jnp.float32)
-    k, v = [jnp.asarray(rng.normal(size=(2, 139, 2, 8)), jnp.float32) for _ in range(2)]
-    mask = jnp.arange(139)[None] < jnp.array([139, 97])[:, None]
+    s, d = 139, 8  # over one 128-query block
+    q = jnp.asarray(rng.normal(size=(2, s, 4, d)), jnp.float32)
+    k, v = [jnp.asarray(rng.normal(size=(2, s, 2, d)), jnp.float32) for _ in range(2)]
+    mask = jnp.arange(s)[None] < jnp.array([s, 97])[:, None]
 
     keys, values = [jnp.repeat(x, 2, axis=2) for x in (k, v)]
-    logits = jnp.einsum("bqhd,bkhd->bhqk", q, keys) * 8**-0.5
-    causal = jnp.arange(139)[:, None] >= jnp.arange(139)[None, :]
+    logits = jnp.einsum("bqhd,bkhd->bhqk", q, keys) * d**-0.5
+    causal = jnp.arange(s)[:, None] >= jnp.arange(s)[None, :]
     logits = jnp.where(mask[:, None, None, :] & causal, logits, -1e30)
     expected = jnp.einsum("bhqk,bkhd->bqhd", jax.nn.softmax(logits, -1), values)
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 import jax
@@ -19,8 +19,8 @@ class EncodedRow:
     input_ids: list[int]
     marker_pos: list[int]
     qtype: int
-    state_stats: dict[str, Any] = field(default_factory=dict)
-    option_stats: dict[str, Any] = field(default_factory=dict)
+    state_stats: dict[str, Any]
+    option_stats: dict[str, Any]
 
 
 class DecisionModel(Protocol):

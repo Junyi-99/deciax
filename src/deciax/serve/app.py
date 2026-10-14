@@ -21,11 +21,16 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import Any, Protocol
 
+import jax
+
+from deciax.decider import DtypeChoice, load
 from deciax.models import MODELS, ModelName
+from deciax.models.base import RequestEngine
 from deciax.ops.backend import ImplChoice
 from deciax.protocol.systemone import (
+    DEFAULT_REQUEST_LIMITS,
     LONE_SURROGATE_DETAIL,
     MAX_BODY_BYTES,
     RequestError,
@@ -38,23 +43,18 @@ from deciax.protocol.systemone import (
 )
 from deciax.runtime.buckets import SEQ_BUCKETS
 
-if TYPE_CHECKING:
-    from deciax.decider import DtypeChoice
-
 log = logging.getLogger("deciax.serve")
 
-BUNDLE_REPO = "convaiinnovations/laya"
+BUNDLE_REPO = MODELS["laya"].repo  # the root bundle id: "let the server choose"
 ALIASES: dict[str, ModelName] = {
-    "clef": "clef",
-    "clef-flash": "clef-flash",
+    **{name: name for name in MODELS},
+    **{c.repo.lower(): name for name, c in MODELS.items() if c.repo != BUNDLE_REPO},
     "english": "laya",
     "en": "laya",
     "default": "laya",
-    "laya": "laya",
     "multilingual": "laya-multilingual",
     "multi": "laya-multilingual",
     "ml": "laya-multilingual",
-    "laya-multilingual": "laya-multilingual",
 }
 UNAVAILABLE = {
     "typed-decisions",
@@ -73,10 +73,9 @@ REFUSED = (
 UNSUPPORTED = ("task", "lang", "lang_guess", "min_confidence", "images", "videos", "media_kwargs")
 UNSUPPORTED_BATCH = ("batch_size", "sort_by_length", "diagnostics")
 MAX_TOKEN_BUDGET = max(SEQ_BUCKETS)
-LIVENESS_ONLY = {"status": "ok"}
 
 
-class Decides(Protocol):
+class Decides(RequestEngine, Protocol):
     def decide(
         self,
         state: Any,
@@ -85,15 +84,6 @@ class Decides(Protocol):
         max_len: int | None = ...,
         head_max_len: int | None = ...,
     ) -> dict[str, Any]: ...
-
-    def decide_batch(
-        self,
-        states: Any,
-        questions: Mapping[Any, Any],
-        *,
-        max_len: int | None = ...,
-        head_max_len: int | None = ...,
-    ) -> list[dict[str, Any]]: ...
 
 
 @dataclass
@@ -169,7 +159,7 @@ class Service:
     # -- endpoints -------------------------------------------------------------------
     def _health(self, authorization: str | None) -> dict[str, Any]:
         if not self.authorized(authorization):
-            return dict(LIVENESS_ONLY)
+            return {"status": "ok"}
         return {
             "status": "ok",
             "loaded": sorted(self.deciders),
@@ -185,14 +175,14 @@ class Service:
 
         state, questions = body.get("state"), body["questions"]
         decider = self.deciders[self.resolve_model(body.get("model"))]
+        limits, budget = _model_caps(decider)
 
-        limits = getattr(getattr(decider, "model", None), "request_limits", RequestLimits())
         check_request_limits(state, questions, limits)
         _refuse_controls(body, UNSUPPORTED)
         if has_lone_surrogate(body):
             raise RequestError(400, LONE_SURROGATE_DETAIL)
 
-        budgets = _budgets(body, getattr(getattr(decider, "model", None), "max_token_budget", MAX_TOKEN_BUDGET))
+        budgets = _budgets(body, budget)
         result, ms = self._infer(lambda: decider.decide(state, questions, **budgets))
 
         return Response(200, self._finish(result), _timing(ms))
@@ -207,14 +197,14 @@ class Service:
 
         states, questions = body["states"], body["questions"]
         decider = self.deciders[self.resolve_model(body.get("model"))]
+        limits, budget = _model_caps(decider)
 
-        limits = getattr(getattr(decider, "model", None), "request_limits", RequestLimits())
         check_batch_limits(states, questions, limits)
         _refuse_controls(body, UNSUPPORTED + UNSUPPORTED_BATCH)
         if has_lone_surrogate(body):
             raise RequestError(400, LONE_SURROGATE_DETAIL)
 
-        budgets = _budgets(body, getattr(getattr(decider, "model", None), "max_token_budget", MAX_TOKEN_BUDGET))
+        budgets = _budgets(body, budget)
         results, ms = self._infer(lambda: decider.decide_batch(states, questions, **budgets))
 
         payload = {
@@ -239,8 +229,7 @@ class Service:
 
         text = str(model).strip()
         key = text.lower()
-        published: dict[str, ModelName] = {c.repo.lower(): name for name, c in MODELS.items() if c.repo != BUNDLE_REPO}
-        name = published.get(key) or ALIASES.get(key)
+        name = ALIASES.get(key)
 
         if name is None and key in UNAVAILABLE:
             raise RequestError(422, f"model {text!r} is not available in deciax")
@@ -302,7 +291,13 @@ def _refuse_controls(body: Mapping[str, Any], unsupported: tuple[str, ...]) -> N
         raise RequestError(422, f"{', '.join(sent)} is not supported by deciax")
 
 
-def _budgets(body: Mapping[str, Any], limit: int = MAX_TOKEN_BUDGET) -> dict[str, int]:
+def _model_caps(decider: Decides) -> tuple[RequestLimits, int]:
+    """The served model's request limits and token budget (defaults for models without them)."""
+    model = getattr(decider, "model", None)
+    return getattr(model, "request_limits", DEFAULT_REQUEST_LIMITS), getattr(model, "max_token_budget", MAX_TOKEN_BUDGET)
+
+
+def _budgets(body: Mapping[str, Any], limit: int) -> dict[str, int]:
     budgets = {}
     for key in ("max_len", "head_max_len"):
         value = body.get(key)
@@ -403,10 +398,6 @@ def serve(
     dtype: DtypeChoice = "auto",
     impl: ImplChoice = "auto",
 ) -> None:
-    import jax
-
-    from deciax.decider import load
-
     deciders: dict[ModelName, Decides] = {}
     for name in models:
         log.info("loading %s", name)

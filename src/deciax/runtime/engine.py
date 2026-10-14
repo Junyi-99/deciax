@@ -10,6 +10,7 @@ import jax
 import numpy as np
 
 from deciax.models.base import DecisionModel, EncodedRow
+from deciax.models.laya.model import MODEL_NAME
 from deciax.protocol.output import DecisionOutput
 from deciax.protocol.types import State, parse_questions
 from deciax.runtime.buckets import ROW_BUCKETS, collate
@@ -55,8 +56,7 @@ class Engine:
     ) -> list[dict[str, Any]]:
         parsed = parse_questions(questions)
         if not parsed:
-            empty = {"input_tokens": 0, "output_tokens": 0}
-            return [{"model": "laya-rl-agent", "answers": {}, "usage": dict(empty)} for _ in states]
+            return [{"model": MODEL_NAME, "answers": {}, "usage": {"input_tokens": 0, "output_tokens": 0}} for _ in states]
 
         per_state = [self.model.encode(s, parsed, max_len, head_max_len) for s in states]
         out = self.run([r for rows in per_state for r in rows])

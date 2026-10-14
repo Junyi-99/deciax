@@ -16,6 +16,12 @@ from safetensors import safe_open
 
 from deciax.models.qwen3_5.config import TextConfig
 
+# JAX PartitionSpec lacks annotations, hence the ignores.
+REPLICATED = P()  # type: ignore[no-untyped-call]
+ROWS = P("tp", None)  # type: ignore[no-untyped-call]
+COLUMNS = P(None, "tp")  # type: ignore[no-untyped-call]
+SHARDED = P("tp")  # type: ignore[no-untyped-call]
+
 
 def tensors(path: Path) -> Iterator[tuple[str, NDArray[Any]]]:
     """Memory-map safetensors, including BF16 without a PyTorch dependency."""
@@ -53,14 +59,12 @@ def layer_weights(raw: Mapping[str, NDArray[Any]], c: TextConfig) -> dict[str, N
 
 def spec(name: str, array: NDArray[Any]) -> P:
     if name.endswith(("out_proj.weight", "o_proj.weight", "down_proj.weight")):
-        return P(None, "tp")  # type: ignore[no-untyped-call]  # JAX PartitionSpec lacks annotations.
-    if array.ndim == 2 and not name.endswith(".conv"):
-        return P("tp", None)  # type: ignore[no-untyped-call]  # JAX PartitionSpec lacks annotations.
-    if name.endswith(".conv"):
-        return P("tp", None)  # type: ignore[no-untyped-call]  # JAX PartitionSpec lacks annotations.
+        return COLUMNS
+    if array.ndim == 2 or name.endswith(".conv"):
+        return ROWS
     if name.endswith(("A_log", "dt_bias")):
-        return P("tp")  # type: ignore[no-untyped-call]  # JAX PartitionSpec lacks annotations.
-    return P()  # type: ignore[no-untyped-call]  # JAX PartitionSpec lacks annotations.
+        return SHARDED
+    return REPLICATED
 
 
 def load(path: Path, config: TextConfig, dtype: DTypeLike, mesh: Mesh) -> tuple[dict[str, jax.Array], list[dict[str, jax.Array]], dict[str, jax.Array]]:
@@ -78,11 +82,11 @@ def load(path: Path, config: TextConfig, dtype: DTypeLike, mesh: Mesh) -> tuple[
             if key.startswith("model.visual."):
                 continue
             if key == "lm_head.weight":
-                top["lm_head"] = put(value, P("tp", None))  # type: ignore[no-untyped-call]  # JAX PartitionSpec lacks annotations.
+                top["lm_head"] = put(value, ROWS)
             elif key == "model.language_model.embed_tokens.weight":
-                top["embedding"] = put(value, P("tp", None))  # type: ignore[no-untyped-call]  # JAX PartitionSpec lacks annotations.
+                top["embedding"] = put(value, ROWS)
             elif key == "model.language_model.norm.weight":
-                top["norm"] = put(value, P())  # type: ignore[no-untyped-call]  # JAX PartitionSpec lacks annotations.
+                top["norm"] = put(value, REPLICATED)
             elif key.startswith("model.language_model.layers."):
                 _, _, _, number, name = key.split(".", 4)
                 for n, v in layer_weights({name: value}, config).items():
@@ -93,5 +97,5 @@ def load(path: Path, config: TextConfig, dtype: DTypeLike, mesh: Mesh) -> tuple[
     if set(top) != {"lm_head", "embedding", "norm"} or any(not p for p in layers):
         raise ValueError("incomplete Clef text checkpoint")
 
-    head = {key: put(v, P()) for key, v in tensors(path / "joint_head.safetensors")}  # type: ignore[no-untyped-call]  # JAX PartitionSpec lacks annotations.
+    head = {key: put(v, REPLICATED) for key, v in tensors(path / "joint_head.safetensors")}
     return top, layers, head

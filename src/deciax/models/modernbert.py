@@ -82,7 +82,7 @@ def encode(
     input_ids: jax.Array,
     attention_mask: jax.Array,
     dtype: jnp.dtype,
-    impl: ImplChoice = "auto",
+    impl: ImplChoice,
 ) -> jax.Array:
     """[B, S] token ids -> [B, S, D] final-norm hidden states (fp32)."""
     batch, seq = input_ids.shape

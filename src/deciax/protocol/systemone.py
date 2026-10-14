@@ -6,6 +6,7 @@ laya/serve.py and laya/confidence.py (laya 0.4.4, Apache-2.0). Model-agnostic.
 
 from __future__ import annotations
 
+import json
 import math
 import re
 from collections.abc import Mapping
@@ -45,8 +46,6 @@ class RequestError(Exception):
 
 
 def _state_length(state: Any) -> int:
-    import json
-
     return len(state) if isinstance(state, str) else len(json.dumps(state, ensure_ascii=False))
 
 

@@ -7,12 +7,10 @@ from deciax.models.laya.config import LayaConfig
 from deciax.models.laya.input import encode_state
 from deciax.models.laya.tokenizer import LayaTokenizer
 from deciax.protocol.types import parse_questions
-from tests.conftest import checkpoint_dir, laya_fixture
-
-MODELS: list[ModelName] = ["laya", "laya-multilingual"]
+from tests.conftest import LAYA_MODELS, checkpoint_dir, laya_fixture
 
 
-@pytest.mark.parametrize("model", MODELS)
+@pytest.mark.parametrize("model", LAYA_MODELS)
 def test_sequences_match_reference(model: ModelName) -> None:
     path = checkpoint_dir(model)
     tok, cfg = LayaTokenizer(path / "tokenizer"), LayaConfig.from_dir(path)

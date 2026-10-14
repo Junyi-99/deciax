@@ -4,12 +4,10 @@ import pytest
 
 from deciax.models import ModelName
 from deciax.models.laya.tokenizer import LayaTokenizer
-from tests.conftest import checkpoint_dir, laya_fixture
-
-MODELS: list[ModelName] = ["laya", "laya-multilingual"]
+from tests.conftest import LAYA_MODELS, checkpoint_dir, laya_fixture
 
 
-@pytest.mark.parametrize("model", MODELS)
+@pytest.mark.parametrize("model", LAYA_MODELS)
 def test_ids_match_autotokenizer(model: ModelName) -> None:
     tok = LayaTokenizer(checkpoint_dir(model) / "tokenizer")
     for case in laya_fixture(model)["tokenizer"]:

@@ -44,7 +44,7 @@ def decision_heads(
     qtype: jax.Array,
     head_layers: int,
     dtype: jnp.dtype,
-    impl: ImplChoice = "auto",
+    impl: ImplChoice,
 ) -> tuple[jax.Array, jax.Array]:
     """[B, S, D] encoder states -> (option logits [B, K], act logits [B, n_act])."""
     batch, seq, d = x.shape
@@ -81,10 +81,7 @@ def _scorer(p: dict[str, jax.Array], x: jax.Array, marker_pos: jax.Array, marker
     count = jnp.maximum(marker_mask.sum(-1), 2)
     ent = -(probs * jnp.log(jnp.maximum(probs, ENTROPY_EPS))).sum(-1) / jnp.log(count)
 
-    if probs.shape[-1] == 1:
-        top = jnp.concatenate([jnp.zeros_like(probs), probs], axis=-1)
-    else:
-        top = jnp.sort(probs, axis=-1)[:, -2:]
+    top = jnp.sort(probs, axis=-1)[:, -2:]  # K >= 2: OPTION_BUCKETS starts at 2
     feats = jnp.stack([top[:, -1], top[:, -1] - top[:, -2], ent, count / OPTION_COUNT_SCALE], -1)
     hidden = jax.nn.gelu(
         _linear(p, "act_head.0", jnp.concatenate([x[:, 0], feats], -1)),

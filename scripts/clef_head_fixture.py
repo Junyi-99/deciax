@@ -15,6 +15,10 @@ import torch
 
 from deciax.models.clef.input import Field, Record, collate
 
+SEED = 131
+CONFIG = {"hidden_size": 32, "width": 16, "routing_layers": 2, "layers": 2, "heads": 4, "feedforward": 32}
+OUT = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "clef_head.npz"
+
 
 def records():
     fields = (
@@ -32,8 +36,8 @@ if __name__ == "__main__":
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
 
-    torch.manual_seed(131)
-    head = module.JointSchemaHead(hidden_size=32, width=16, routing_layers=2, layers=2, heads=4, feedforward=32).eval()
+    torch.manual_seed(SEED)
+    head = module.JointSchemaHead(**CONFIG).eval()
     h = torch.randn(4, 128, 32)
     embedding = torch.randn(128, 32)
 
@@ -51,16 +55,16 @@ if __name__ == "__main__":
     saved.update({"param." + k: v.numpy() for k, v in head.state_dict().items()})
     saved.update({"array." + k: v for k, v in arrays.items()})
     saved.update({"expected." + str(i): torch.cat(row).numpy() for i, row in enumerate(out)})
-    np.savez_compressed("tests/fixtures/clef_head.npz", **saved)
+    np.savez_compressed(OUT, **saved)
 
     metadata = {
         "source": "https://huggingface.co/Cloudflare/clef/blob/0b331204bb13fbd2ca93a64df1956f5b55478ce5/joint_schema_model.py",
         "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
         "generator": "scripts/clef_head_fixture.py",
-        "seed": 131,
+        "seed": SEED,
         "torch": torch.__version__,
         "dtype": "float32",
-        "config": {"hidden_size": 32, "width": 16, "routing_layers": 2, "layers": 2, "heads": 4, "feedforward": 32},
-        "fixture_sha256": hashlib.sha256(Path("tests/fixtures/clef_head.npz").read_bytes()).hexdigest(),
+        "config": CONFIG,
+        "fixture_sha256": hashlib.sha256(OUT.read_bytes()).hexdigest(),
     }
-    Path("tests/fixtures/clef_head.json").write_text(json.dumps(metadata, indent=2) + "\n")
+    OUT.with_suffix(".json").write_text(json.dumps(metadata, indent=2) + "\n")

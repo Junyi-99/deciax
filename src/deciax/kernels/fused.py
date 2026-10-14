@@ -32,13 +32,16 @@ class Rope:
 
     cos: jax.Array
     sin: jax.Array
-    seq: int
+
+    @property
+    def seq(self) -> int:
+        return int(self.cos.shape[0])
 
 
 def rope_tables(inv_freq: jax.Array, seq: int) -> Rope:
     freqs = jnp.arange(seq, dtype=F32)[:, None] * inv_freq[None, :]  # [S, 32]
     cos, sin = (jnp.tile(f(freqs), (1, 4)) for f in (jnp.cos, jnp.sin))
-    return Rope(cos, sin, seq)
+    return Rope(cos, sin)
 
 
 @dataclass(frozen=True)
@@ -108,14 +111,13 @@ def _norm_project(
     normalize: bool,
     tn: int,
     rope: tuple[jax.Array, jax.Array] | None,
-    rope_blocks: int,
 ) -> None:
-    """o_ref = LayerNorm(x) @ w + b, column chunk by chunk; RoPE on chunks j < rope_blocks."""
+    """o_ref = LayerNorm(x) @ w + b, column chunk by chunk; RoPE on the q and k chunks (j < 2)."""
     xn = (_layer_norm(x, nw_ref[...], nb_ref[...], eps) if normalize else x).astype(w_ref.dtype)
     for j in range(w_ref.shape[1] // tn):
         cols = slice(j * tn, (j + 1) * tn)
         y = _dense(xn, w_ref[:, cols], b_ref[:, cols]).astype(o_ref.dtype)
-        if rope is not None and j < rope_blocks:
+        if rope is not None and j < 2:
             y = _rope(y, *rope)
         o_ref[:, cols] = y
 
@@ -129,8 +131,7 @@ def _mlp(y: jax.Array, nw_ref: Ref, nb_ref: Ref, wi_ref: Ref, bi_ref: Ref, wo2_r
 
 
 def _check_mlp(act: Act, wi_t: jax.Array, wo2_t: jax.Array) -> None:
-    f, fp = wi_t.shape[1], wo2_t.shape[0]
-    assert act in ("gated_gelu", "relu") and f == (2 * fp if act == "gated_gelu" else fp), (act, f, fp)
+    assert wi_t.shape[1] == (2 if act == "gated_gelu" else 1) * wo2_t.shape[0], (act, wi_t.shape, wo2_t.shape)
 
 
 # ---------------------------------------------------------------- pallas_call plumbing
@@ -181,12 +182,11 @@ def norm_linear(
     *,
     normalize: bool = True,
     rope: Rope | None = None,
-    rope_blocks: int = 0,
     tn: int | None = None,
 ) -> jax.Array:
     """[R, D] fp32 -> LayerNorm (if `normalize`) -> @ w_t [D, N] + bias -> [R, N] bf16.
 
-    The kernel walks w_t in column chunks of `tn` (default D). With `rope`, chunks j < rope_blocks
+    The kernel walks w_t in column chunks of `tn` (default D). With `rope`, the first two chunks
     (q and k) get RoPE at position row % rope.seq, in bf16 like the jnp path.
     """
     rows, d = x.shape
@@ -208,7 +208,7 @@ def norm_linear(
     def kernel(*refs: Ref) -> None:
         x_ref, nw_ref, nb_ref, w_ref, b_ref, *rope_refs, o_ref = refs
         tables = (rope_refs[0][...], rope_refs[1][...]) if rope_refs else None
-        _norm_project(x_ref[...].astype(F32), nw_ref, nb_ref, w_ref, b_ref, o_ref, eps=eps, normalize=normalize, tn=tn, rope=tables, rope_blocks=rope_blocks)
+        _norm_project(x_ref[...].astype(F32), nw_ref, nb_ref, w_ref, b_ref, o_ref, eps=eps, normalize=normalize, tn=tn, rope=tables)
 
     return _row_call(kernel, inputs, (rows, n), jnp.bfloat16, tm, "norm_linear_rope" if rope is not None else "norm_linear")
 
@@ -273,7 +273,6 @@ def layer(
     nseq = min(batch, max(1, TM // seq))  # sequences per grid step
     assert batch % nseq == 0, (batch, nseq)
     tm = nseq * seq
-    scale = HEAD_DIM**-0.5
     cos, sin = (rope.cos, rope.sin) if rope is not None else (jnp.zeros((seq, LANE), F32),) * 2
 
     inputs = [
@@ -301,14 +300,14 @@ def layer(
         x_ref, m_ref, n1w_ref, n1b_ref, wqkv_ref, bqkv_ref, cos_ref, sin_ref, wo_ref, bo_ref, *mlp_refs, o_ref, qkv_sc, att_sc = refs
         xv = x_ref[...]
         tables = (jnp.tile(cos_ref[...], (nseq, 1)), jnp.tile(sin_ref[...], (nseq, 1))) if rope is not None else None
-        _norm_project(xv, n1w_ref, n1b_ref, wqkv_ref, bqkv_ref, qkv_sc, eps=eps, normalize=normalize, tn=d, rope=tables, rope_blocks=2)
+        _norm_project(xv, n1w_ref, n1b_ref, wqkv_ref, bqkv_ref, qkv_sc, eps=eps, normalize=normalize, tn=d, rope=tables)
 
         for s in range(nseq):  # scores transposed, [keys, queries]
             r = slice(s * seq, (s + 1) * seq)
             bias = mask_bias(m_ref[s], (seq, seq), window)
             for h in range(heads):
                 q, k, v = (qkv_sc[r, head_cols(h, j * d)] for j in range(3))
-                st = scores_t(q, k, scale) + bias
+                st = scores_t(q, k) + bias
                 p = jnp.exp(st - st.max(0, keepdims=True))
                 att_sc[r, head_cols(h)] = jnp.transpose(pv_t(v, p) / p.sum(0, keepdims=True)).astype(att_sc.dtype)
 
@@ -337,6 +336,6 @@ def encoder_layer(
     if seq <= LAYER_MAX_SEQ:
         return layer(x, mask, w, seq=seq, heads=heads, eps=eps, act=act, window=window, rope=rope, normalize=normalize)
     d = x.shape[1]
-    qkv = norm_linear(x, w.norm1_w, w.norm1_b, eps, w.w_qkv_t, w.b_qkv, normalize=normalize, rope=rope, rope_blocks=2, tn=d)
+    qkv = norm_linear(x, w.norm1_w, w.norm1_b, eps, w.w_qkv_t, w.b_qkv, normalize=normalize, rope=rope)
     att = flash_attention(qkv.reshape(-1, seq, 3 * d), mask, heads=heads, window=window)
     return out_mlp(att.reshape(-1, d), x, w.wo_t, w.bo, w.norm2_w, w.norm2_b, eps, w.wi_t, w.bi, w.wo2_t, w.b2, act=act)

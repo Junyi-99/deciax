@@ -50,7 +50,7 @@ def to_answer(question: Question, slot_probs: Probs, act_probability: float) -> 
     """`slot_probs`: the calibrated distribution over this question's K slots."""
     k = len(slot_probs)
     p = unpermute_probs(slot_probs, question.option_order)
-    action = {"act_probability": round(float(act_probability), 4)}
+    act = round(float(act_probability), 4)
     ans_conf = round(answer_confidence(p, k), 4)
 
     if question.type == "choice":
@@ -61,7 +61,7 @@ def to_answer(question: Question, slot_probs: Probs, act_probability: float) -> 
             "probabilities": {kk: round(float(v), 4) for kk, v in zip(keys, p, strict=True)},
             "confidence": round(confidence_from_probs(p, k), 4),
             "answer_confidence": ans_conf,
-            "action": {"act_probability": action["act_probability"]},
+            "action": {"act_probability": act},
         }
 
     if question.type == "score":
@@ -72,7 +72,7 @@ def to_answer(question: Question, slot_probs: Probs, act_probability: float) -> 
             "probabilities": {str(i): round(float(v), 4) for i, v in enumerate(p)},
             "confidence": round(confidence_from_probs(p, k), 4),
             "answer_confidence": ans_conf,
-            "action": {"act_probability": action["act_probability"]},
+            "action": {"act_probability": act},
         }
 
     p_true = float(p[1])
@@ -81,5 +81,5 @@ def to_answer(question: Question, slot_probs: Probs, act_probability: float) -> 
         "noul": round(p_true, 4),
         "confidence": round(max(p_true, 1.0 - p_true), 4),
         "answer_confidence": ans_conf,
-        "action": {"act_probability": action["act_probability"]},
+        "action": {"act_probability": act},
     }

@@ -22,10 +22,10 @@ def dense(x: jax.Array, p: Mapping[str, jax.Array], name: str) -> jax.Array:
     return linear(x, p[name + ".weight"], p.get(name + ".bias")).astype(x.dtype)
 
 
-def rms(x: jax.Array, weight: jax.Array, eps: float, offset: bool = True) -> jax.Array:
+def rms(x: jax.Array, weight: jax.Array, eps: float) -> jax.Array:
     value = x.astype(jnp.float32)
     value *= jax.lax.rsqrt(jnp.mean(value * value, axis=-1, keepdims=True) + eps)
-    return (value * (weight.astype(jnp.float32) + int(offset))).astype(x.dtype)
+    return (value * (weight.astype(jnp.float32) + 1)).astype(x.dtype)
 
 
 def causal_conv(x: jax.Array, weight: jax.Array) -> jax.Array:

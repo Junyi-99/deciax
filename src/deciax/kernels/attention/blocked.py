@@ -1,7 +1,9 @@
-"""Exact attention with bounded score-matrix memory, including GQA and cross attention."""
+"""Exact pure-jnp attention for Qwen3.5 / Clef: GQA, cross and causal masks, queries scanned in blocks to bound score memory."""
 
 import jax
 import jax.numpy as jnp
+
+from deciax.kernels.attention.reference import MASK_FILL
 
 
 def attention(q: jax.Array, k: jax.Array, v: jax.Array, key_mask: jax.Array, *, causal: bool = False, block: int = 128) -> jax.Array:
@@ -22,7 +24,7 @@ def attention(q: jax.Array, k: jax.Array, v: jax.Array, key_mask: jax.Array, *, 
         if causal:
             valid = valid & (jnp.arange(k.shape[1])[None, :] <= (idx * block + jnp.arange(block))[:, None])[None, None]
 
-        weights = jax.nn.softmax(jnp.where(valid, scores, -1e30), axis=-1).astype(q.dtype)
+        weights = jax.nn.softmax(jnp.where(valid, scores, MASK_FILL), axis=-1).astype(q.dtype)
         out = jnp.einsum("bhqk,bkhd->bqhd", weights, v, preferred_element_type=jnp.float32, precision=jax.lax.Precision.HIGHEST)
         return None, out.astype(q.dtype)
 

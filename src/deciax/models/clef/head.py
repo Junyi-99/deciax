@@ -12,7 +12,9 @@ import jax.numpy as jnp
 
 from deciax.kernels.attention.blocked import attention
 from deciax.models.qwen3_5.text import dense
-from deciax.nn import layer_norm
+from deciax.nn import layer_norm, linear
+
+MAX_LOGIT_SCALE = math.log(100.0)
 
 
 def norm(x: jax.Array, p: Mapping[str, jax.Array], name: str) -> jax.Array:
@@ -37,19 +39,15 @@ def normalize(x: jax.Array, eps: float = 1e-12) -> jax.Array:
 
 
 def mha(query: jax.Array, memory: jax.Array, mask: jax.Array, p: Mapping[str, jax.Array], name: str, heads: int) -> jax.Array:
-    w = p[name + ".in_proj_weight"]
-    bias = p[name + ".in_proj_bias"]
-    width = query.shape[-1]
-    values = []
+    wq, wk, wv = jnp.split(p[name + ".in_proj_weight"], 3)
+    bq, bk, bv = jnp.split(p[name + ".in_proj_bias"], 3)
+    head_shape = (heads, query.shape[-1] // heads)
 
-    for i, x in enumerate((query, memory, memory)):
-        values.append(
-            dense(x, {"p.weight": w[i * width : (i + 1) * width], "p.bias": bias[i * width : (i + 1) * width]}, "p").reshape(
-                *x.shape[:2], heads, width // heads
-            )
-        )
+    q = linear(query, wq, bq).astype(query.dtype).reshape(*query.shape[:2], *head_shape)
+    k = linear(memory, wk, bk).astype(memory.dtype).reshape(*memory.shape[:2], *head_shape)
+    v = linear(memory, wv, bv).astype(memory.dtype).reshape(*memory.shape[:2], *head_shape)
 
-    out = attention(values[0], values[1], values[2], mask).reshape(query.shape)
+    out = attention(q, k, v, mask).reshape(query.shape)
     return dense(out, p, name + ".out_proj")
 
 
@@ -77,7 +75,7 @@ def forward(
 
     base = dense(questions, p, "question_projection")
     logits = jnp.einsum("bow,bqw->bqo", options, base, preferred_element_type=jnp.float32, precision="highest").astype(h.dtype)
-    logits = (logits / math.sqrt(base.shape[-1])).astype(h.dtype)
+    logits = logits / math.sqrt(base.shape[-1])
     owns = (owners[:, None, :] == jnp.arange(base.shape[1])[None, :, None]) & a["option_mask"][:, None, :]
     routing = jax.nn.softmax(jnp.where(owns, logits.astype(jnp.float32), -1e30), -1).astype(h.dtype)
 
@@ -98,12 +96,12 @@ def forward(
     fields = gather(norm(fields, p, "field_norm"), owners)
     anchor = normalize(gather(questions, owners) + global_vector[:, None])
     prior = jnp.sum((normalize(lexical) * anchor).astype(h.dtype), -1, dtype=jnp.float32).astype(h.dtype)
-    prior *= jnp.exp(jnp.minimum(p["prior_logit_scale"], math.log(100.0)))
+    prior *= jnp.exp(jnp.minimum(p["prior_logit_scale"], MAX_LOGIT_SCALE))
 
     options = norm(options, p, "option_norm")
     cosine = jnp.sum((normalize(fields, 1e-8) * normalize(options, 1e-8)).astype(h.dtype), -1, dtype=jnp.float32).astype(h.dtype)
     features = jnp.concatenate((fields, options, fields * options, jnp.abs(fields - options)), -1)
     residual = dense(jax.nn.gelu(dense(features, p, "residual_scorer.0"), approximate=False), p, "residual_scorer.3")[..., 0]
-    joint = jnp.exp(jnp.minimum(p["joint_logit_scale"], math.log(100.0))) * cosine + residual
+    joint = jnp.exp(jnp.minimum(p["joint_logit_scale"], MAX_LOGIT_SCALE)) * cosine + residual
 
     return jnp.where(a["option_mask"], prior + jax.nn.sigmoid(p["residual_gate"]) * joint, -1e9).astype(jnp.float32)

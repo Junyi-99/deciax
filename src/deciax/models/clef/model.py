@@ -12,22 +12,21 @@ from typing import Any
 import jax
 import numpy as np
 from jax.sharding import Mesh, NamedSharding
-from jax.sharding import PartitionSpec as P
 from numpy.typing import DTypeLike, NDArray
 from tokenizers import Tokenizer
 
 from deciax.models import ModelName
 from deciax.models.clef import head, weights
-from deciax.models.clef.input import collate, decode, encode
+from deciax.models.clef.input import MAX_TOKENS, collate, decode, encode
 from deciax.models.qwen3_5 import text
 from deciax.models.qwen3_5.config import TextConfig
-from deciax.protocol.systemone import MAX_BODY_BYTES, RequestLimits
+from deciax.protocol.systemone import MAX_BODY_BYTES, MAX_TOTAL_OPTIONS, RequestLimits
 from deciax.protocol.types import State
 
 
 class ClefModel:
-    max_token_budget = 16384
-    request_limits = RequestLimits(state_chars=MAX_BODY_BYTES, choice_options=512, score_levels=512)
+    max_token_budget = MAX_TOKENS
+    request_limits = RequestLimits(state_chars=MAX_BODY_BYTES, choice_options=MAX_TOTAL_OPTIONS, score_levels=MAX_TOTAL_OPTIONS)
 
     def __init__(self, path: Path, dtype: DTypeLike, name: ModelName = "clef") -> None:
         self.name = name
@@ -42,10 +41,10 @@ class ClefModel:
         devices = jax.local_devices()
         if len(devices) not in (1, 2, 4):
             raise ValueError("Clef supports one host with 1, 2, or 4 local devices")
-        self.mesh = Mesh(np.asarray(devices), ("tp",))
-        self.replicated = NamedSharding(self.mesh, P())  # type: ignore[no-untyped-call]  # JAX PartitionSpec lacks annotations.
+        mesh = Mesh(np.asarray(devices), ("tp",))
+        self.replicated = NamedSharding(mesh, weights.REPLICATED)
 
-        self.top, self.layers, self.head = weights.load(path, self.config, dtype, self.mesh)
+        self.top, self.layers, self.head = weights.load(path, self.config, dtype, mesh)
 
         self._embed = jax.jit(lambda w, ids: w[ids], out_shardings=self.replicated)
         self._layer = jax.jit(text.layer, static_argnames=("config", "linear_attention"), out_shardings=self.replicated)

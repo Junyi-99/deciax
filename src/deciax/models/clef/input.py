@@ -16,11 +16,14 @@ from numpy.typing import NDArray
 from tokenizers import Tokenizer
 
 from deciax.models import ModelName
-from deciax.runtime.buckets import bucket
+from deciax.protocol.answers import softmax
+from deciax.protocol.systemone import MAX_QUESTIONS, MAX_TOTAL_OPTIONS
+from deciax.runtime.buckets import ROW_BUCKETS, bucket
 
 SYSTEM_PROMPT = "Read the complete state and schema. Decide every field jointly. Each answer must be exactly one of that field's allowed options."
-QTYPES = {"noul": 0, "choice": 1, "score": 2}
+CLEF_QTYPES = {"noul": 0, "choice": 1, "score": 2}  # the trained type-embedding order
 SEQUENCE_BUCKETS = (128, 256, 512, 1024, 2048, 4096, 8192, 16384)
+MAX_TOKENS = SEQUENCE_BUCKETS[-1]
 SCHEMA_BUCKETS = (1, 2, 4, 8, 16, 32, 64, 128, 256, 512)
 
 
@@ -58,14 +61,14 @@ class Record:
 def validate_questions(questions: Mapping[Any, Any]) -> None:
     if not isinstance(questions, Mapping) or not questions:
         raise ValueError("Clef requires at least one question")
-    if len(questions) > 64:
-        raise ValueError("Clef supports at most 64 questions per request")
+    if len(questions) > MAX_QUESTIONS:
+        raise ValueError(f"Clef supports at most {MAX_QUESTIONS} questions per request")
 
     total = 0
     for qid, q in questions.items():
         if not isinstance(qid, str) or not qid:
             raise ValueError("Clef question ids must be nonempty strings")
-        if not isinstance(q, Mapping) or not isinstance(q.get("type"), str) or q.get("type") not in QTYPES:
+        if not isinstance(q, Mapping) or not isinstance(q.get("type"), str) or q.get("type") not in CLEF_QTYPES:
             raise ValueError(f"{qid}: type must be noul, choice, or score")
 
         if any(k in q for k in ("labels", "option_order")):
@@ -81,14 +84,14 @@ def validate_questions(questions: Mapping[Any, Any]) -> None:
 
         total += len(options(q))
 
-    if total > 512:
-        raise ValueError("Clef supports at most 512 total options per request")
+    if total > MAX_TOTAL_OPTIONS:
+        raise ValueError(f"Clef supports at most {MAX_TOTAL_OPTIONS} total options per request")
 
 
-def encode(tokenizer: Tokenizer, state: Any, questions: Mapping[str, Any], max_length: int = 16384) -> Record:
+def encode(tokenizer: Tokenizer, state: Any, questions: Mapping[str, Any], max_length: int = MAX_TOKENS) -> Record:
     validate_questions(questions)
-    if isinstance(max_length, bool) or not isinstance(max_length, int) or not 1 <= max_length <= max(SEQUENCE_BUCKETS):
-        raise ValueError("Clef max_len must be between 1 and 16384")
+    if isinstance(max_length, bool) or not isinstance(max_length, int) or not 1 <= max_length <= MAX_TOKENS:
+        raise ValueError(f"Clef max_len must be between 1 and {MAX_TOKENS}")
 
     def tokens(text: str) -> list[int]:
         return list(tokenizer.encode(text, add_special_tokens=False).ids)
@@ -99,7 +102,7 @@ def encode(tokenizer: Tokenizer, state: Any, questions: Mapping[str, Any], max_l
         schema += tokens(f"\nFIELD {i + 1}\nID: {qid}\nTYPE: {q['type']}\nINSTRUCTION: ")
         start = len(schema)
         instruction = q.get("instructions")
-        schema += tokens(render(str(qid) if instruction is None or instruction == "" else instruction))
+        schema += tokens(qid if instruction in (None, "") else render(instruction))
         span = (start, len(schema))
 
         schema += tokens("\nALLOWED OPTIONS:\n")
@@ -116,7 +119,7 @@ def encode(tokenizer: Tokenizer, state: Any, questions: Mapping[str, Any], max_l
             schema += tokens("\n")
 
         schema += tokens("END FIELD\n")
-        fields.append(Field(qid, QTYPES[q["type"]], span, tuple(spans), tuple(ids)))
+        fields.append(Field(qid, CLEF_QTYPES[q["type"]], span, tuple(spans), tuple(ids)))
 
     prefix = tokens(f"<|im_start|>system\n{SYSTEM_PROMPT}<|im_end|>\n<|im_start|>user\nSTATE:\n")
     suffix = tokens("\n<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nJOINT SCHEMA DECISIONS:")
@@ -136,7 +139,7 @@ def encode(tokenizer: Tokenizer, state: Any, questions: Mapping[str, Any], max_l
 
 def collate(records: Sequence[Record], pad_id: int) -> dict[str, NDArray[Any]]:
     """Pad complete records; options are flat with explicit field ownership."""
-    b = bucket(len(records), (1, 2, 4, 8))
+    b = bucket(len(records), ROW_BUCKETS)
     s = bucket(max(len(r.ids) for r in records), SEQUENCE_BUCKETS)
     q = bucket(max(len(r.fields) for r in records), SCHEMA_BUCKETS)
     o = bucket(max(sum(len(f.option_ids) for f in r.fields) for r in records), SCHEMA_BUCKETS)
@@ -186,19 +189,17 @@ def decode(record: Record, logits: NDArray[Any], questions: Mapping[str, Any], m
         values = logits[offset : offset + n].astype(np.float32)
         if not np.isfinite(values).all():
             raise FloatingPointError("non-finite Clef option logits")
-        p = np.exp(values - values.max())
-        p /= p.sum()
-        probs = dict(zip(f.option_ids, p.tolist(), strict=True))
+        probs = dict(zip(f.option_ids, softmax(values).tolist(), strict=True))
 
         q = questions[f.id]
-        if f.kind == 0:
+        if q["type"] == "noul":
             answer: dict[str, Any] = {"type": "noul", "noul": round(probs["true"], 4)}
-        elif f.kind == 1:
+        elif q["type"] == "choice":
             keys = [str(k) for k in q["criteria"]]
             chosen = max(keys, key=probs.__getitem__)
             answer = {"type": "choice", "choice": chosen, "confidence": round(probs[chosen], 4), "probabilities": {k: round(probs[k], 4) for k in keys}}
         else:
-            keys = [str(i) for i in range(n)]
+            keys = list(f.option_ids)
             answer = {
                 "type": "score",
                 "score": round(sum(i * probs[k] for i, k in enumerate(keys)), 4),

@@ -76,6 +76,7 @@ def fused_hbm_bytes(model, rows: int, seq: int) -> dict[str, float]:
     for custom calls): each input block is fetched once per change of its block index, each output
     block written once; weights have constant indices, so they are fetched once per kernel."""
     from deciax.kernels.attention.pallas import BLOCK
+    from deciax.kernels.fused import LAYER_MAX_SEQ
 
     cfg = model.config.encoder
     d = cfg.hidden_size
@@ -94,8 +95,12 @@ def fused_hbm_bytes(model, rows: int, seq: int) -> dict[str, float]:
         return rows * (seq * d * bf + 2 * visited * tk * d * bf + seq * d * bf)  # q once, k and v per visited block, out
 
     def layer(k: str, window: int, act: str) -> float:
-        qkv = r * d * f32 + fp[f"{k}.WqkvT" if "encoder" in k else f"{k}.in_projT"].size * bf + r * 3 * d * bf
+        wqkv = fp[f"{k}.WqkvT" if "encoder" in k else f"{k}.in_projT"]
         wi, wo2 = (fp[f"{k}.WiT"], fp[f"{k}.Wo2T"]) if act == "gated_gelu" else (fp[f"{k}.linear1T"], fp[f"{k}.linear2T"])
+        weights = (wqkv.size + d * d + wi.size + wo2.size) * bf
+        if seq <= LAYER_MAX_SEQ:  # fused.layer: x in, mask, weights, x' out; qkv and att stay in VMEM scratch
+            return r * d * f32 + rows * seq * 4 + weights + r * d * f32
+        qkv = r * d * f32 + wqkv.size * bf + r * 3 * d * bf
         mlp = r * d * bf + r * d * f32 + (d * d + wi.size + wo2.size) * bf + r * d * f32
         return qkv + attention(window) + mlp
 

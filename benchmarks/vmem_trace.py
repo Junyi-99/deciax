@@ -35,8 +35,14 @@ from deciax.kernels.attention import pallas
 
 MB = 1 << 20
 SIZE = {"f32": 4, "bf16": 2, "i32": 4}
-KINDS = ("norm_linear_rope", "flash_attention_w64", "flash_attention_w0", "out_mlp_gated_gelu", "norm_linear", "out_mlp_relu")
+# seq <= fused.LAYER_MAX_SEQ: one kernel per layer (encoder sliding / full, head); longer sequences: three kernels per layer
+KINDS_LAYER = ("layer_gated_gelu_w64", "layer_gated_gelu_w0", "layer_relu_w0")
+KINDS_THREE = ("norm_linear_rope", "flash_attention_w64", "flash_attention_w0", "out_mlp_gated_gelu", "norm_linear", "out_mlp_relu")
+ALL_KINDS = KINDS_LAYER + KINDS_THREE
 COLOR = {
+    "layer_gated_gelu_w64": "#7C3AED",
+    "layer_gated_gelu_w0": "#1E40AF",
+    "layer_relu_w0": "#15803D",
     "norm_linear_rope": "#1E40AF",
     "norm_linear": "#60A5FA",
     "flash_attention_w64": "#B91C1C",
@@ -57,10 +63,11 @@ DIMS = {
     "N": "QKV projection width = 3 * D (q | k | v, each H heads of Dh)",
     "F": "MLP hidden width as computed: 2 * Fp for the gated GELU (a | b), Fp for ReLU",
     "Fp": "MLP intermediate width after padding to a multiple of 128 lanes",
-    "tm": "row block of norm_linear / out_mlp: rows per grid step, min(512, R)",
+    "tm": "rows per grid step: nseq * S for layer (whole sequences), min(512, R) for norm_linear / out_mlp",
+    "nseq": "sequences per grid step of layer: min(B, 512 // S)",
     "tq": "query block of flash_attention: positions per grid step",
     "tk": "key block of flash_attention: positions per key step",
-    "L": "cos / sin table rows: tm if a row block holds whole sequences, else S",
+    "L": "cos / sin table rows: S for layer; tm if a row block holds whole sequences, else S, for norm_linear",
 }
 SHORT = {n: m.split(":")[0].split(" (")[0].split(" = ")[0] for n, m in DIMS.items()}  # short meaning for inline shapes
 
@@ -195,10 +202,18 @@ def kernels_for(model, rows: int, seq: int) -> dict[str, Kernel]:
             layers=layers,
         )
 
-    norm_linear("norm_linear_rope", fp[f"{k0}.WqkvT"], jnp.zeros((3 * d,), jnp.float32), True, fp[f"{k0}.attn_norm"], zeros, len(cfg.layer_types))
-    norm_linear(
-        "norm_linear", fp[f"{h0}.in_projT"], p[f"{h0}.self_attn.in_proj_bias"], False, p[f"{h0}.norm1.weight"], p[f"{h0}.norm1.bias"], model.config.head_layers
-    )
+    three = seq > fused.LAYER_MAX_SEQ
+    if three:
+        norm_linear("norm_linear_rope", fp[f"{k0}.WqkvT"], jnp.zeros((3 * d,), jnp.float32), True, fp[f"{k0}.attn_norm"], zeros, len(cfg.layer_types))
+        norm_linear(
+            "norm_linear",
+            fp[f"{h0}.in_projT"],
+            p[f"{h0}.self_attn.in_proj_bias"],
+            False,
+            p[f"{h0}.norm1.weight"],
+            p[f"{h0}.norm1.bias"],
+            model.config.head_layers,
+        )
 
     def flash(kind: str, window: int, layers: int):
         tq = min(pallas.BLOCK if window else 2 * pallas.BLOCK, seq)
@@ -248,8 +263,9 @@ def kernels_for(model, rows: int, seq: int) -> dict[str, Kernel]:
             layers=layers,
         )
 
-    flash("flash_attention_w64", cfg.window, n_slide)
-    flash("flash_attention_w0", 0, n_full + model.config.head_layers)
+    if three:
+        flash("flash_attention_w64", cfg.window, n_slide)
+        flash("flash_attention_w0", 0, n_full + model.config.head_layers)
 
     def out_mlp(kind: str, wo_t, bo, nw, nb, wi_t, bi, wo2_t, b2, act: str, layers: int):
         f, fp_ = wi_t.shape[1], wo2_t.shape[0]
@@ -295,8 +311,150 @@ def kernels_for(model, rows: int, seq: int) -> dict[str, Kernel]:
             layers=layers,
         )
 
-    out_mlp(
-        "out_mlp_gated_gelu",
+    if three:
+        out_mlp(
+            "out_mlp_gated_gelu",
+            fp[f"{k0}.WoT"],
+            zeros,
+            fp[f"{k0}.mlp_norm"],
+            zeros,
+            fp[f"{k0}.WiT"],
+            f_zeros,
+            fp[f"{k0}.Wo2T"],
+            zeros,
+            "gated_gelu",
+            len(cfg.layer_types),
+        )
+        out_mlp(
+            "out_mlp_relu",
+            fp[f"{h0}.out_projT"],
+            p[f"{h0}.self_attn.out_proj.bias"],
+            p[f"{h0}.norm2.weight"],
+            p[f"{h0}.norm2.bias"],
+            fp[f"{h0}.linear1T"],
+            p[f"{h0}.linear1.bias"],
+            fp[f"{h0}.linear2T"],
+            p[f"{h0}.linear2.bias"],
+            "relu",
+            model.config.head_layers,
+        )
+        return out
+
+    def layer_kernel(kind: str, window: int, act: str, with_rope: bool, w: tuple, layers: int):
+        """`fused.layer`: one grid step = nseq whole sequences; every intermediate of the layer stays in VMEM."""
+        nw1, nb1, wqkv_t, bqkv, wo_t, bo, nw2, nb2, wi_t, bi, wo2_t, b2 = w
+        n, f, fp_ = wqkv_t.shape[1], wi_t.shape[1], wo2_t.shape[0]
+        nseq = min(rows, max(1, fused.TM // seq))
+        tml = nseq * seq
+        TML, NN, Ff, Fp, SS = dim("tm", tml), dim("N", n), dim("F", f), dim("Fp", fp_), dim("S", seq)
+        blocks = {
+            "x": Tensor("f32", (TML, Dd)),
+            "mask": Tensor("i32", (dim("nseq", nseq), dim("1", 1, "row"), SS)),
+            "norm1 w, b": Tensor("f32", (dim("2", 2, "weight and bias"), Dd)),
+            "Wqkv^T": Tensor("bf16", (Dd, NN)),
+            "b_qkv": Tensor("f32", (NN,)),
+            "cos, sin": Tensor(
+                "f32", (dim("2", 2, "cos and sin"), dim("L", seq), dim("128", 128, "one head's rotate-half pattern, duplicated for 2 heads per vreg"))
+            ),
+            "Wo^T": Tensor("bf16", (Dd, Dd)),
+            "norm2 w, b": Tensor("f32", (dim("2", 2, "weight and bias"), Dd)),
+            "Wi^T": Tensor("bf16", (Dd, Ff)),
+            "Wo2^T": Tensor("bf16", (Fp, Dd)),
+            "bo, b2, bi": Tensor("f32", (dim("2D+F", 2 * d + f, "the three biases"),)),
+            "out x'": Tensor("f32", (TML, Dd)),
+        }
+        resident = ("norm1 w, b", "Wqkv^T", "b_qkv", "cos, sin", "Wo^T", "norm2 w, b", "Wi^T", "Wo2^T", "bo, b2, bi")
+        scratch = {
+            "qkv_sc (q | k | v after RoPE, all heads)": Tensor("bf16", (TML, NN)),
+            "att_sc (attention output, all heads)": Tensor("bf16", (TML, Dd)),
+        }
+        wbytes = (d * n + d * d + d * f + fp_ * d) * 2
+        x_live = tml * d * 4  # the x block stays live through the attention for the residual add
+        ss = seq * seq
+        g_label = (
+            f"g = gelu(h[:, :Fp]) * h[:, Fp:] -> {Tensor('bf16', (TML, Fp)).shape}"
+            if act == "gated_gelu"
+            else f"g = relu(h) -> {Tensor('bf16', (TML, Fp)).shape}"
+        )
+        out[kind] = Kernel(
+            kind,
+            r // tml,
+            blocks,
+            resident,
+            ("out x'",),
+            scratch,
+            r * d * 4 + rows * seq * 4 + wbytes,
+            r * d * 4,
+            [
+                ("normalized rows xn", Tensor("bf16", (TML, Dd))),
+                ("fp32 matmul result of one QKV chunk, before the bf16 cast", Tensor("f32", (TML, Dd))),
+                ("RoPE rotated copy and cos / sin tiles" if with_rope else "bias add", Tensor("bf16" if with_rope else "f32", (TML, Dd))),
+                ("mask + window bias, one sequence (shared by all heads)", Tensor("f32", (SS, SS))),
+                ("scores s^T = k q^T, one sequence and head (whole S x S: single-pass softmax, no online rescaling)", Tensor("f32", (SS, SS))),
+                ("probabilities p^T (fp32, then bf16 for the MXU)", Tensor("f32", (SS, SS))),
+                ("o^T = v^T p^T, one head", Tensor("f32", (DH, SS))),
+                ("y = att @ Wo + bo + x", Tensor("f32", (TML, Dd))),
+                ("normalized y", Tensor("bf16", (TML, Dd))),
+                ("MLP hidden h", Tensor("f32", (TML, Ff))),
+                ("gelu(a) * b" if act == "gated_gelu" else "relu(h)", Tensor("bf16", (TML, Fp))),
+            ],
+            substeps=[
+                (f"DMA x block {blocks['x'].shape} + mask (prefetched); weights resident", 0),
+                (f"LayerNorm -> xn {Tensor('bf16', (TML, Dd)).shape}", x_live + tml * d * 6),
+                *[
+                    (
+                        f"chunk {j}: xn @ Wqkv^T[:, {j}D:{j + 1}D] + b -> bf16[tm, D]"
+                        + (" -> RoPE (2 rolls + tiles)" if with_rope and j < 2 else "")
+                        + " -> qkv_sc",
+                        x_live + tml * d * 2 + tml * d * 6 + (tml * d * 10 if with_rope and j < 2 else 0),
+                    )
+                    for j in range(3)
+                ],
+                (f"per sequence (x{nseq}): mask + window -> bias {Tensor('f32', (SS, SS)).shape}", x_live + ss * 4),
+                (f"per head (x{heads}): s^T = k q^T {Tensor('f32', (SS, SS)).shape} + bias; p = exp(s^T - max); l = sum p", x_live + ss * 4 * 3),
+                (
+                    f"per head: o^T = v^T p^T {Tensor('f32', (DH, SS)).shape}; att_sc[rows, head] = (o^T / l)^T bf16",
+                    x_live + ss * 4 * 2 + ss * 2 + 64 * seq * 8,
+                ),
+                (f"y = att_sc @ Wo^T + bo + x  {Tensor('f32', (TML, Dd)).shape}", x_live + tml * d * 4),
+                (f"z = LayerNorm(y) -> {Tensor('bf16', (TML, Dd)).shape}", tml * d * 4 + tml * d * 6),
+                (f"h = z @ Wi^T + bi  {Tensor('f32', (TML, Ff)).shape}", tml * d * 6 + tml * f * 4),
+                (g_label, tml * d * 4 + tml * f * 4 + tml * fp_ * 6),
+                (f"out = g @ Wo2^T + b2 + y -> out block {blocks['out x' + chr(39)].shape} -> HBM", tml * d * 8 + tml * fp_ * 2),
+            ],
+            call=(
+                lambda x, mask, nw1, nb1, wqkv_t, bqkv, cos, sin, wo_t, bo, nw2, nb2, wi_t, bi, wo2_t, b2: fused.layer(
+                    x,
+                    mask,
+                    nw1,
+                    nb1,
+                    wqkv_t,
+                    bqkv,
+                    fused.Rope(cos, sin, seq) if with_rope else None,
+                    wo_t,
+                    bo,
+                    nw2,
+                    nb2,
+                    wi_t,
+                    bi,
+                    wo2_t,
+                    b2,
+                    seq=seq,
+                    heads=heads,
+                    window=window,
+                    eps=eps,
+                    act=act,
+                ),
+                (x, mask, nw1, nb1, wqkv_t, bqkv, rope.cos, rope.sin, wo_t, bo, nw2, nb2, wi_t, bi, wo2_t, b2),
+            ),
+            layers=layers,
+        )
+
+    enc_w = (
+        fp[f"{k0}.attn_norm"],
+        zeros,
+        fp[f"{k0}.WqkvT"],
+        jnp.zeros((3 * d,), jnp.float32),
         fp[f"{k0}.WoT"],
         zeros,
         fp[f"{k0}.mlp_norm"],
@@ -305,11 +463,12 @@ def kernels_for(model, rows: int, seq: int) -> dict[str, Kernel]:
         f_zeros,
         fp[f"{k0}.Wo2T"],
         zeros,
-        "gated_gelu",
-        len(cfg.layer_types),
     )
-    out_mlp(
-        "out_mlp_relu",
+    head_w = (
+        p[f"{h0}.norm1.weight"],
+        p[f"{h0}.norm1.bias"],
+        fp[f"{h0}.in_projT"],
+        p[f"{h0}.self_attn.in_proj_bias"],
         fp[f"{h0}.out_projT"],
         p[f"{h0}.self_attn.out_proj.bias"],
         p[f"{h0}.norm2.weight"],
@@ -318,9 +477,10 @@ def kernels_for(model, rows: int, seq: int) -> dict[str, Kernel]:
         p[f"{h0}.linear1.bias"],
         fp[f"{h0}.linear2T"],
         p[f"{h0}.linear2.bias"],
-        "relu",
-        model.config.head_layers,
     )
+    layer_kernel("layer_gated_gelu_w64", cfg.window, "gated_gelu", True, enc_w, n_slide)
+    layer_kernel("layer_gated_gelu_w0", 0, "gated_gelu", True, enc_w, n_full)
+    layer_kernel("layer_relu_w0", 0, "relu", False, head_w, model.config.head_layers)
     return out
 
 
@@ -372,7 +532,7 @@ def trace_forward(model, arrays) -> list[dict]:
     for e in tpu:
         if tids.get((e["pid"], e["tid"])) != "XLA Ops" or not (t0 <= e["ts"] <= t1):
             continue
-        kind = next((k for k in KINDS if e["name"].startswith(k) and not e["name"].startswith(k + "_")), "xla")
+        kind = next((k for k in ALL_KINDS if e["name"].startswith(k) and not e["name"].startswith(k + "_")), "xla")
         prefetch = kind == "xla" and any(e["name"].startswith(a) for a in ("copy-start", "copy-done", "slice-start", "slice-done"))
         # async copy / slice ops are XLA prefetching kernel operands (weights, norm vectors, biases) into VMEM (memory
         # space S(1)); the kernels' BlockSpec accounting already counts those bytes, so they are not added again
@@ -435,23 +595,51 @@ def svg_flow(model, rows: int, seq: int, kernels: dict[str, Kernel]) -> str:
     xs = f"x f32[R={r}, D={d}] {r * d * 4 / 1e6:.0f} MB"
     qkvs = f"qkv bf16[R={r}, N={3 * d}] {r * 3 * d * 2 / 1e6:.0f} MB"
     atts = f"att bf16[R={r}, D={d}] {r * d * 2 / 1e6:.0f} MB"
-    steps = [
-        ("embedding gather (XLA, SparseCore offload)", None, "", xs),
-        ("embedding LayerNorm (XLA fusion)", None, "", xs),
-        (f"encoder layer i (x{n_enc}): norm_linear_rope", kl["norm_linear_rope"], "LayerNorm -> @Wqkv -> RoPE on the q and k heads", qkvs),
-        (
-            "    flash_attention (w64 sliding / w0 full)",
-            kl["flash_attention_w64"],
-            "online softmax over key blocks; key mask and sliding window built in VMEM",
-            f"{atts} (+ {xs} re-read)",
-        ),
-        ("    out_mlp_gated_gelu", kl["out_mlp_gated_gelu"], "@Wo + x -> LayerNorm -> @Wi -> gelu(a) * b -> @Wo2 + y", f"{xs} -> next layer"),
-        ("final LayerNorm + type_emb add (XLA)", None, "", xs),
-        (f"head layer j (x{model.config.head_layers}): norm_linear", kl["norm_linear"], "LayerNorm -> @in_proj + bias", qkvs),
-        ("    flash_attention_w0", kl["flash_attention_w0"], "full attention", atts),
-        ("    out_mlp_relu", kl["out_mlp_relu"], "@out_proj + x -> LayerNorm -> @linear1 -> relu -> @linear2 + y", xs),
-        ("scorer + act head (XLA, marker rows only)", None, "", "option / act logits"),
-    ]
+    n_full = sum(t == "full_attention" for t in cfg.layer_types)
+    mlp = "@Wo + x -> LayerNorm -> @Wi -> gelu(a) * b -> @Wo2 + y"
+    if "layer_gated_gelu_w0" in kl:
+        steps = [
+            ("embedding gather (XLA, SparseCore offload)", None, "", xs),
+            ("embedding LayerNorm (XLA fusion)", None, "", xs),
+            (
+                f"encoder layer i, sliding (x{n_enc - n_full}): layer_gated_gelu_w64",
+                kl["layer_gated_gelu_w64"],
+                f"LayerNorm -> @Wqkv -> RoPE -> attention, window {cfg.window}, all heads -> {mlp}",
+                f"{xs} -> next layer",
+            ),
+            (
+                f"encoder layer i, full (x{n_full}): layer_gated_gelu_w0",
+                kl["layer_gated_gelu_w0"],
+                f"LayerNorm -> @Wqkv -> RoPE -> full attention, all heads -> {mlp}",
+                f"{xs} -> next layer",
+            ),
+            ("final LayerNorm + type_emb add (XLA)", None, "", xs),
+            (
+                f"head layer j (x{model.config.head_layers}): layer_relu_w0",
+                kl["layer_relu_w0"],
+                "LayerNorm -> @in_proj + bias -> full attention -> @out_proj + x -> LayerNorm -> @linear1 -> relu -> @linear2 + y",
+                xs,
+            ),
+            ("scorer + act head (XLA, marker rows only)", None, "", "option / act logits"),
+        ]
+    else:
+        steps = [
+            ("embedding gather (XLA, SparseCore offload)", None, "", xs),
+            ("embedding LayerNorm (XLA fusion)", None, "", xs),
+            (f"encoder layer i (x{n_enc}): norm_linear_rope", kl["norm_linear_rope"], "LayerNorm -> @Wqkv -> RoPE on the q and k heads", qkvs),
+            (
+                "    flash_attention (w64 sliding / w0 full)",
+                kl["flash_attention_w64"],
+                "online softmax over key blocks; key mask and sliding window built in VMEM",
+                f"{atts} (+ {xs} re-read)",
+            ),
+            ("    out_mlp_gated_gelu", kl["out_mlp_gated_gelu"], "@Wo + x -> LayerNorm -> @Wi -> gelu(a) * b -> @Wo2 + y", f"{xs} -> next layer"),
+            ("final LayerNorm + type_emb add (XLA)", None, "", xs),
+            (f"head layer j (x{model.config.head_layers}): norm_linear", kl["norm_linear"], "LayerNorm -> @in_proj + bias", qkvs),
+            ("    flash_attention_w0", kl["flash_attention_w0"], "full attention", atts),
+            ("    out_mlp_relu", kl["out_mlp_relu"], "@out_proj + x -> LayerNorm -> @linear1 -> relu -> @linear2 + y", xs),
+            ("scorer + act head (XLA, marker rows only)", None, "", "option / act logits"),
+        ]
     parts, y = [], 44
     for label, k, sub, hbm in steps:
         color = COLOR[k.kind] if k else COLOR["xla"]
@@ -460,8 +648,7 @@ def svg_flow(model, rows: int, seq: int, kernels: dict[str, Kernel]) -> str:
         y += row
         parts.append(arrow(y, "HBM: " + hbm))
         y += 16
-    for kind in KINDS:
-        k = kl[kind]
+    for kind, k in kl.items():
         y += 26
         parts.append(
             f'<text x="{x0}" y="{y}" font-size="13" font-weight="600" fill="{COLOR[kind]}">{kind}: one grid step of {k.grid_steps} per call, {k.layers} layers. '
@@ -559,16 +746,21 @@ def render(model, rows: int, seq: int, kernels: dict[str, Kernel], ops: list[dic
         o["vmem"] = k.vmem_measured if k else 0
         if k:
             o["hbm_bytes"] = k.hbm_read + k.hbm_write
-    kernel_us = {kind: sum(o["dur_us"] for o in ops if o["kind"] == kind) for kind in KINDS}
+    one_kernel = "layer_gated_gelu_w0" in kernels
+    kernel_us = {kind: sum(o["dur_us"] for o in ops if o["kind"] == kind) for kind in kernels}
     xla_us = sum(o["dur_us"] for o in ops if o["kind"] == "xla")
     hbm_total = sum(o["hbm_bytes"] for o in ops)
     n_prefetch = sum(o.get("prefetch", False) for o in ops)
     xla_fusion = [o for o in ops if o["kind"] == "xla" and not o.get("prefetch")]
-    ends = [o["start_us"] + o["dur_us"] for o in ops if o["kind"] == "out_mlp_gated_gelu"]
+    enc_last = ("layer_gated_gelu_w64", "layer_gated_gelu_w0") if one_kernel else ("out_mlp_gated_gelu",)
+    ends = sorted(o["start_us"] + o["dur_us"] for o in ops if o["kind"] in enc_last)
     zoom_hi = ends[2] if len(ends) > 2 else total_us
-    legend = " ".join(f'<span class="sw" style="background:{COLOR[k]}"></span>{k}' for k in [*KINDS, "xla"])
-    vmem_peak = max(k.vmem_measured for k in kernels.values())
-    tm = min(fused.TM, r)
+    legend = " ".join(f'<span class="sw" style="background:{COLOR[k]}"></span>{k}' for k in [*kernels, "xla"])
+    peak_kind = max(kernels, key=lambda k: kernels[k].vmem_measured)
+    peak = kernels[peak_kind]
+    vmem_peak = peak.vmem_measured
+    nseq = min(rows, max(1, fused.TM // seq))
+    tm = nseq * seq if one_kernel else min(fused.TM, r)
 
     values = {
         "B": rows,
@@ -581,9 +773,10 @@ def render(model, rows: int, seq: int, kernels: dict[str, Kernel], ops: list[dic
         "F": f,
         "Fp": fp_,
         "tm": tm,
-        "tq": f"{min(256, seq)} (window layers) / {min(512, seq)} (full)",
-        "tk": f"{min(128, seq)} (window layers) / {min(512, seq)} (full)",
-        "L": max(tm, seq),
+        "nseq": nseq if one_kernel else "n/a (three-kernel path)",
+        "tq": "n/a: the whole sequence, S x S scores per head in one pass" if one_kernel else f"{min(256, seq)} (window layers) / {min(512, seq)} (full)",
+        "tk": "n/a" if one_kernel else f"{min(128, seq)} (window layers) / {min(512, seq)} (full)",
+        "L": seq if one_kernel else max(tm, seq),
     }
     notation = "".join(f"<tr><td><code>{n}</code></td><td>{values[n]}</td><td>{html.escape(m)}</td></tr>" for n, m in DIMS.items())
 
@@ -602,7 +795,7 @@ def render(model, rows: int, seq: int, kernels: dict[str, Kernel], ops: list[dic
             out.append(f"<tr><td>{html.escape(name)}</td><td><code>{html.escape(t.long)}</code></td><td>{t.bytes / MB:.2f}</td><td>{role}</td></tr>")
         for name, t in k.scratch.items():
             out.append(
-                f"<tr><td>{html.escape(name)}</td><td><code>{html.escape(t.long)}</code></td><td>{t.bytes / MB:.2f}</td><td>scratch: persists across the key-block axis</td></tr>"
+                f"<tr><td>{html.escape(name)}</td><td><code>{html.escape(t.long)}</code></td><td>{t.bytes / MB:.2f}</td><td>scratch: {'written by the projection, read by the attention / out-proj of the same grid step' if one_kernel else 'persists across the key-block axis'}</td></tr>"
             )
         for name, t in k.stays_in_vmem:
             out.append(
@@ -615,7 +808,7 @@ def render(model, rows: int, seq: int, kernels: dict[str, Kernel], ops: list[dic
         f"VMEM measured <b>{k.vmem_measured / MB:.1f} MB</b> = weights {k.weights_bytes / MB:.1f} + blocks x2 {k.stream_bytes / MB:.1f} + scratch {k.scratch_bytes / MB:.1f} + temporaries {max(k.vmem_measured - k.resident, 0) / MB:.1f}; "
         f"HBM {k.hbm_read / 1e6:.0f} MB read / {k.hbm_write / 1e6:.0f} MB written per call; {kernel_us[kind] / 1000:.2f} ms per forward ({kernel_us[kind] / total_us:.0%})</h3>"
         f"<table><tr><th>tensor</th><th>dtype[dim=value (meaning), ...] per grid step</th><th>MB</th><th>role</th></tr>{tensor_rows(k)}</table>"
-        for kind, k in ((kind, kernels[kind]) for kind in KINDS)
+        for kind, k in kernels.items()
     )
 
     def tensor(dtype: str, *dims: tuple[str, int]) -> Tensor:
@@ -634,24 +827,83 @@ def render(model, rows: int, seq: int, kernels: dict[str, Kernel], ops: list[dic
         f"<tr><td>{n}</td><td><code>{html.escape(t.shape)}</code></td><td>{t.bytes * m / 1e6:.0f}</td><td>{2 * t.bytes * m / 1e6:.0f}</td></tr>"
         for n, t, m in gone
     )
-    still = [
+    wbytes = (d * 3 * d + d * d + d * f + fp_ * d) * 2
+    three_kernel = [  # the cross-kernel tensors of the three-kernel path (norm_linear -> flash_attention -> out_mlp)
+        ("qkv", tensor("bf16", ("R", r), ("N", 3 * d)), "norm_linear -> flash_attention; now the qkv_sc scratch of the layer kernel"),
+        ("att", tensor("bf16", ("R", r), ("D", d)), "flash_attention -> out_mlp; now the att_sc scratch of the layer kernel"),
         (
-            "qkv",
-            tensor("bf16", ("R", r), ("N", 3 * d)),
-            "norm_linear -> flash_attention. Needed: a query block attends to every key block of its sequence, so all positions must be projected before the first query block runs.",
+            "x re-read",
+            tensor("f32", ("R", r), ("D", d)),
+            "norm_linear and out_mlp both read the residual stream; the layer kernel reads it once (read only: half the write + read column)",
         ),
-        (
-            "att",
-            tensor("bf16", ("R", r), ("D", d)),
-            "flash_attention -> out_mlp. A per-row-block boundary only; fusable into out_mlp's prologue (a row block's attention output depends on that block's queries alone).",
-        ),
-        ("x re-read", tensor("f32", ("R", r), ("D", d)), "norm_linear and out_mlp both read the residual stream; one fused layer kernel would read it once."),
     ]
+    three_html = "".join(
+        f"<tr><td>{n}</td><td><code>{html.escape(t.shape)}</code></td><td>{t.bytes / 1e6:.0f}</td><td>{(t.bytes if n == 'x re-read' else 2 * t.bytes) / 1e6:.0f}</td><td>{html.escape(why)}</td></tr>"
+        for n, t, why in three_kernel
+    )
+    if one_kernel:
+        still = [
+            (
+                "x in, x' out",
+                tensor("f32", ("R", r), ("D", d)),
+                "the residual stream: read once at the start of the layer kernel, written once at the end; the only activation on HBM",
+            ),
+            ("mask", tensor("i32", ("B", rows), ("S", seq)), "key validity per sequence; the window and the mask bias are built in VMEM"),
+            (
+                "weights Wqkv^T, Wo^T, Wi^T, Wo2^T",
+                Tensor("bf16", (dim("4 matrices", wbytes // 2, "elements of Wqkv^T + Wo^T + Wi^T + Wo2^T"),)),
+                "fetched once per kernel call (constant block index); XLA prefetches them into VMEM ahead of the call",
+            ),
+        ]
+    else:
+        still = [
+            (
+                "qkv",
+                tensor("bf16", ("R", r), ("N", 3 * d)),
+                "norm_linear -> flash_attention. Needed: a query block attends to every key block of its sequence, so all positions must be projected before the first query block runs.",
+            ),
+            (
+                "att",
+                tensor("bf16", ("R", r), ("D", d)),
+                "flash_attention -> out_mlp. A per-row-block boundary only; fusable into out_mlp's prologue (a row block's attention output depends on that block's queries alone).",
+            ),
+            (
+                "x re-read",
+                tensor("f32", ("R", r), ("D", d)),
+                "norm_linear and out_mlp both read the residual stream; one fused layer kernel would read it once.",
+            ),
+            (
+                "weights Wqkv^T, Wo^T, Wi^T, Wo2^T",
+                Tensor("bf16", (dim("4 matrices", wbytes // 2, "elements of Wqkv^T + Wo^T + Wi^T + Wo2^T"),)),
+                "fetched once per kernel call (constant block index)",
+            ),
+        ]
     still_html = "".join(
         f"<tr><td>{n}</td><td><code>{html.escape(t.shape)}</code></td><td>{t.bytes / 1e6:.0f}</td><td>{html.escape(why)}</td></tr>" for n, t, why in still
     )
-    one = seq * d * 4 * 2 + seq * 3 * d * 2 + heads * seq * seq * 4 + seq * f * 4 + (d * d * 2 + d * 3 * d + d * f + fp_ * d) * 2
-    per_layer_now = sum(k.hbm_read + k.hbm_write for k in (kernels["norm_linear_rope"], kernels["flash_attention_w64"], kernels["out_mlp_gated_gelu"]))
+    enc_kinds = ("layer_gated_gelu_w64",) if one_kernel else ("norm_linear_rope", "flash_attention_w64", "out_mlp_gated_gelu")
+    per_layer_now = sum(kernels[k].hbm_read + kernels[k].hbm_write for k in enc_kinds)
+    per_layer_three = r * d * 4 * 3 + r * 3 * d * 2 * 2 + r * d * 2 * 2 + wbytes  # x read twice + x' written, qkv and att written + read once, weights
+    per_layer_one = r * d * 4 * 2 + rows * seq * 4 + wbytes
+    if one_kernel:
+        so_what = (
+            f"Peak VMEM is {vmem_peak / MB:.0f} MB of 128 MiB ({peak_kind}: the four resident weight matrices {peak.weights_bytes / MB:.0f} MB, the qkv / att scratch of one grid step {peak.scratch_bytes / MB:.0f} MB, "
+            f"the double-buffered x / x' blocks {peak.stream_bytes / MB:.0f} MB, and {max(vmem_peak - peak.resident, 0) / MB:.0f} MB of body temporaries: one head's S x S scores and probabilities, the MLP hidden of one row block). "
+            f"VMEM does not grow with the batch: a grid step holds nseq = {nseq} whole sequences (tm = {tm} rows) and a bigger batch only adds grid steps; the sequence length sets the S x S scores and, through tm = nseq * S, nothing else up to S = {fused.LAYER_MAX_SEQ}. "
+            f"HBM traffic is {hbm_total / 1e9:.1f} GB per call ({hbm_total / 1e3 / total_us:.0f} GB/s average): per encoder layer only the residual stream in and out ({2 * r * d * 4 / 1e6:.0f} MB) and the weights ({wbytes / 1e6:.0f} MB); every intermediate of the layer, including the qkv projection and the attention output that the three-kernel path wrote to HBM, stays in VMEM."
+        )
+    else:
+        so_what = (
+            f"Peak VMEM is {vmem_peak / MB:.0f} MB of 128 MiB ({peak_kind}: resident weights {peak.weights_bytes / MB:.0f} MB, plus double-buffered row blocks and the fp32 MLP hidden of one row block). "
+            f"VMEM does not grow with the batch: every kernel works on fixed blocks (tm rows, tq x tk positions) and a bigger batch only adds grid steps; the sequence length changes the flash blocks (up to 512 x 512) and the cos / sin tables. "
+            f"HBM traffic is {hbm_total / 1e9:.1f} GB per call ({hbm_total / 1e3 / total_us:.0f} GB/s average); every per-token intermediate of a layer stays in VMEM, what still crosses HBM is the three cross-kernel tensors per layer (qkv, att, the residual stream) and the weights."
+        )
+    closing = (
+        f"An encoder layer now moves about {per_layer_now / 1e6:.0f} MB through HBM (x in, x' out, mask, weights) against about {per_layer_three / 1e6:.0f} MB with three kernels (qkv and att written and read back, the residual read twice). "
+        f"The single-pass attention keeps one head's S x S scores ({seq * seq * 4 / MB:.1f} MB fp32) in VMEM; above S = {fused.LAYER_MAX_SEQ} the scores and the sequence-sized row block stop fitting next to the weights and the model falls back to norm_linear -> flash_attention -> out_mlp (run this script with --seq {2 * fused.LAYER_MAX_SEQ} for that page)."
+        if one_kernel
+        else f"At S = {seq} the sequences are longer than LAYER_MAX_SEQ = {fused.LAYER_MAX_SEQ}, so the layer runs as three kernels; the one-kernel layer (grid over whole sequences, S x S scores of a head in VMEM) is used up to S = {fused.LAYER_MAX_SEQ}, where a layer moves about {per_layer_one / 1e6:.0f} MB instead of {per_layer_three / 1e6:.0f} MB."
+    )
 
     css = """body{font:14px/1.5 -apple-system,Helvetica,Arial,sans-serif;color:#0F172A;max-width:1200px;margin:24px auto;padding:0 16px}
 h1{font-size:22px}h2{font-size:17px;margin-top:36px}h3{font-size:14px;margin:26px 0 6px}table{border-collapse:collapse;font-size:13px;width:100%}td,th{border-bottom:1px solid #E2E8F0;padding:5px 8px;text-align:left;vertical-align:top}
@@ -659,7 +911,7 @@ th{background:#F1F5F9}code{font:12px ui-monospace,Menlo,monospace;background:#F1
 .legend{font-size:12px;color:#475569;margin:6px 0 14px}.so{border-left:4px solid #1E40AF;background:#EFF6FF;padding:8px 14px;margin:12px 0}small{color:#475569}"""
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><title>VMEM / HBM trace: laya {rows}x{seq} on {device}</title><style>{css}</style></head><body>
 <h1>VMEM occupancy and HBM traffic, one fused forward ({rows} rows x {seq} tokens, {device})</h1>
-<p class="so"><b>So what:</b> the forward runs {len([o for o in ops if o["kind"] != "xla"])} Pallas kernels in {total_us / 1000:.1f} ms; the kernels hold {(total_us - xla_us) / total_us:.0%} of the time. Peak VMEM is {vmem_peak / MB:.0f} MB of 128 MiB (out_mlp: {kernels["out_mlp_gated_gelu"].vmem_measured / MB:.0f} MB = the three resident weight matrices, {kernels["out_mlp_gated_gelu"].weights_bytes / MB:.0f} MB, plus double-buffered row blocks and the fp32 MLP hidden of one row block). VMEM does not grow with the batch: every kernel works on fixed blocks (tm rows, tq x tk positions) and a bigger batch only adds grid steps; the sequence length changes the flash blocks (up to 512 x 512) and the cos / sin tables. HBM traffic is {hbm_total / 1e9:.1f} GB per call ({hbm_total / 1e3 / total_us:.0f} GB/s average); every per-token intermediate of a layer stays in VMEM, what still crosses HBM is the three cross-kernel tensors per layer (qkv, att, the residual stream) and the weights.</p>
+<p class="so"><b>So what:</b> the forward runs {len([o for o in ops if o["kind"] != "xla"])} Pallas kernels ({"one per layer" if one_kernel else "three per layer"}) in {total_us / 1000:.1f} ms; the kernels hold {(total_us - xla_us) / total_us:.0%} of the time. {so_what}</p>
 <div class="legend">{legend} &nbsp;|&nbsp; VMEM = smallest <code>vmem_limit_bytes</code> that compiles (binary search, 0.25 MB); XLA ops (grey, no VMEM shown) are the glue between kernels (embedding gather, norms, scorer).</div>
 <h2>Notation</h2>
 <table><tr><th>symbol</th><th>value in this run</th><th>meaning</th></tr>{notation}</table>
@@ -673,12 +925,14 @@ th{background:#F1F5F9}code{font:12px ui-monospace,Menlo,monospace;background:#F1
 <p><small>Around the kernels XLA runs {n_prefetch} async copy / slice ops that prefetch kernel operands into VMEM (memory space S(1)) ahead of each custom call; their bytes are the same weight reads the BlockSpec accounting counts and are not added to the HBM total. The remaining {len(xla_fusion)} XLA ops (embedding gather, embedding / final norms, type_emb add, scorer) take {sum(o["dur_us"] for o in xla_fusion) / 1000:.2f} ms and move {sum(o["hbm_bytes"] for o in xla_fusion) / 1e6:.0f} MB.</small></p>
 <h2>Timeline</h2>
 {svg_timeline(ops, 0, total_us, "Whole forward")}
-{svg_timeline(ops, 0, zoom_hi, "Zoom: encoder layers 0-2 (norm_linear_rope -> flash_attention -> out_mlp per layer)")}
+{svg_timeline(ops, 0, zoom_hi, "Zoom: encoder layers 0-2 (" + ("one layer kernel per layer" if one_kernel else "norm_linear_rope -> flash_attention -> out_mlp per layer") + ")")}
 <h2>Intermediates that no longer touch HBM (per encoder layer, vs the XLA path)</h2>
 <table><tr><th>intermediate</th><th>shape in the XLA path</th><th>size (MB)</th><th>HBM traffic saved per layer, write + read (MB)</th></tr>{gone_html}</table>
-<h2>What still crosses HBM between kernels (per encoder layer)</h2>
+<h2>Cross-kernel tensors of the three-kernel path{" that the layer kernel keeps in VMEM" if one_kernel else ""} (per encoder layer)</h2>
+<table><tr><th>tensor</th><th>shape</th><th>size (MB)</th><th>HBM traffic {"saved" if one_kernel else "per layer"} (MB)</th><th>why</th></tr>{three_html}</table>
+<h2>What still crosses HBM (per encoder layer)</h2>
 <table><tr><th>tensor</th><th>shape</th><th>size (MB)</th><th>why</th></tr>{still_html}</table>
-<p>At S = {seq}, one kernel per layer per sequence (grid over sequences, all heads in VMEM) would need about {one / MB:.0f} MB of VMEM for its live values plus weights (residual, qkv, all scores, the MLP hidden, the four weight matrices): it fits in 128 MiB up to about S = 512 and would remove the qkv / att round trips and the second residual read, i.e. ~{(r * 3 * d * 2 * 2 + r * d * 2 * 2 + r * d * 4) / 1e6:.0f} MB of the ~{per_layer_now / 1e6:.0f} MB a layer moves now. Beyond that the attention must stay a separate flash kernel.</p>
+<p>{closing}</p>
 </body></html>"""
 
 

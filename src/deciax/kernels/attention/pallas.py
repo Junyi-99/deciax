@@ -39,9 +39,9 @@ def mask_bias(key_mask: jax.Array, shape: tuple[int, int], window: int, k0: jax.
     return jnp.broadcast_to(jnp.where(allowed, 0.0, MASK_FILL).astype(F32), shape)
 
 
-def scores_t(q: jax.Array, k: jax.Array, scale: float) -> jax.Array:
-    """k @ (q * scale)^T: [tk, tq] fp32."""
-    return jax.lax.dot_general(k, q * scale, (((1,), (1,)), ((), ())), preferred_element_type=F32)
+def scores_t(q: jax.Array, k: jax.Array) -> jax.Array:
+    """k @ (q / sqrt(64))^T: [tk, tq] fp32."""
+    return jax.lax.dot_general(k, q * HEAD_DIM**-0.5, (((1,), (1,)), ((), ())), preferred_element_type=F32)
 
 
 def pv_t(v: jax.Array, p: jax.Array) -> jax.Array:
@@ -55,8 +55,6 @@ def flash_attention(
     *,
     heads: int,
     window: int = 0,
-    tq: int | None = None,
-    tk: int | None = None,
     out_dtype: jnp.dtype = jnp.bfloat16,
 ) -> jax.Array:
     """Packed [B, S, 3 * H * 64] q | k | v, mask [B, S] (1 = real token) -> [B, S, H * 64].
@@ -64,18 +62,17 @@ def flash_attention(
     Grid (batch, query block, key step); each step runs all heads and keeps the online-softmax
     state in VMEM scratch. Sliding windows visit only the key blocks that intersect the window.
     Scores are transposed (k @ q^T, [tk, tq]): PV then streams 64 rows per head through the MXU
-    instead of tq, and the softmax reductions run along sublanes. Default blocks, tuned on v6e:
+    instead of tq, and the softmax reductions run along sublanes. Blocks, tuned on v6e:
     512 x 512 full, 256 x 128 sliding.
     """
     batch, seq, three_d = qkv.shape
     d = heads * HEAD_DIM
     assert three_d == 3 * d, (qkv.shape, heads)
-    tq = min(tq or (BLOCK if window else 2 * BLOCK), seq)
-    tk = min(tk or (BLOCK // 2 if window else 2 * BLOCK), seq)
+    tq = min(BLOCK if window else 2 * BLOCK, seq)
+    tk = min(BLOCK // 2 if window else 2 * BLOCK, seq)
     assert seq % tq == 0 and seq % tk == 0, (seq, tq, tk)
     nq, nk = seq // tq, seq // tk
     steps = min(nk, (tq - 1 + 2 * window) // tk + 2) if window else nk
-    scale = HEAD_DIM**-0.5
 
     def first_block(i: jax.Array) -> jax.Array:
         """First key block within the window of query block i."""
@@ -104,7 +101,7 @@ def flash_attention(
             bias = mask_bias(m_ref[...], (tk, tq), window, k0=kb * tk, q0=i * tq)
             for h in range(heads):
                 cols = head_cols(h)
-                st = scores_t(q_ref[:, cols], k_ref[:, cols], scale) + bias
+                st = scores_t(q_ref[:, cols], k_ref[:, cols]) + bias
                 m_prev = m_sc[h]  # [1, tq]
                 m_new = jnp.maximum(m_prev, st.max(0, keepdims=True))
                 alpha = jnp.exp(m_prev - m_new)

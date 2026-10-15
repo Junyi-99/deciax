@@ -4,6 +4,7 @@ version = "0.1.1.dev3"
 description = "High-performance decision models on TPUs, powered by JAX and Pallas."
 keywords = ["decision-models", "jax", "pallas", "tpu"]
 readme = "README.md"
+license-files = ["LICENSES/Apache-2.0.txt"]
 authors = [
     { name = "Junyi Hou", email = "hji200914@gmail.com" }
 ]

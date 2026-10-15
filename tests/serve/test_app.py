@@ -1,10 +1,13 @@
 import json
 import threading
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from deciax.models import ModelName
+from deciax.models.clef.model import ClefModel
+from deciax.protocol.systemone import MAX_CHOICE_OPTIONS, MAX_STATE_CHARS
 from deciax.serve.app import Service
 
 QUESTIONS = {"n": {"type": "noul", "instructions": "Is it?"}}
@@ -129,7 +132,7 @@ def test_model_not_loaded() -> None:
 )
 def test_client_errors(body: Any, status: int) -> None:
     service, _ = make()
-    r = post(service, body if isinstance(body, bytes) else json.dumps(body).encode())
+    r = post(service, body)
     assert r.status == status and "detail" in r.payload
 
 
@@ -205,3 +208,31 @@ def test_busy_returns_503() -> None:
     first.join()
 
     assert r.status == 503 and r.headers["Retry-After"] == "1"
+
+
+def test_clef_alias_budget_and_text_only() -> None:
+    budget = ClefModel.max_token_budget
+    fake = FakeDecider("clef")
+    fake.model = SimpleNamespace(max_token_budget=budget)  # type: ignore[attr-defined]
+    service = Service({"clef": fake}, "clef")
+
+    assert service.resolve_model("Cloudflare/clef") == "clef"
+
+    result = post(service, {"state": "s", "questions": QUESTIONS, "max_len": budget})
+    assert result.status == 200
+    assert fake.calls[-1]["max_len"] == budget
+
+    assert post(service, {"state": "s", "questions": QUESTIONS, "max_len": budget + 1}).status == 422
+    assert post(service, {"state": "s", "questions": QUESTIONS, "images": []}).status == 422
+
+
+def test_clef_request_limits_are_used_for_single_and_batch() -> None:
+    fake = FakeDecider("clef")
+    fake.model = SimpleNamespace(request_limits=ClefModel.request_limits)  # type: ignore[attr-defined]
+    service = Service({"clef": fake}, "clef")
+
+    questions = {"intent": {"type": "choice", "criteria": {str(i): str(i) for i in range(MAX_CHOICE_OPTIONS + 1)}}}
+    state = "x" * (MAX_STATE_CHARS + 1)  # over the default limits, within Clef's
+
+    assert post(service, {"state": state, "questions": questions}).status == 200
+    assert post(service, {"states": [state], "questions": questions}, "/v1/systemone/batch").status == 200

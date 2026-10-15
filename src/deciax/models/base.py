@@ -1,9 +1,9 @@
-"""The interface every decision-model family implements."""
+"""Request-engine interface and the row-based interface used by Laya."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass, field
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 import jax
@@ -19,8 +19,8 @@ class EncodedRow:
     input_ids: list[int]
     marker_pos: list[int]
     qtype: int
-    state_stats: dict[str, Any] = field(default_factory=dict)
-    option_stats: dict[str, Any] = field(default_factory=dict)
+    state_stats: dict[str, Any]
+    option_stats: dict[str, Any]
 
 
 class DecisionModel(Protocol):
@@ -42,3 +42,18 @@ class DecisionModel(Protocol):
         output: DecisionOutput,
         questions: Mapping[Any, Question],
     ) -> dict[str, Any]: ...
+
+
+class RequestEngine(Protocol):
+    def decide_batch(
+        self,
+        states: Sequence[State],
+        questions: Mapping[Any, Mapping[str, Any]],
+        *,
+        max_len: int | None = None,
+        head_max_len: int | None = None,
+    ) -> list[dict[str, Any]]: ...
+
+
+class RequestModel(Protocol):
+    def build_engine(self) -> RequestEngine: ...

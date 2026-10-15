@@ -1,4 +1,4 @@
-"""Backend-agnostic primitives. Matmuls run in the input dtype with fp32 accumulation."""
+"""Backend-agnostic primitives. Matmuls run in the weight dtype with fp32 accumulation."""
 
 from __future__ import annotations
 

@@ -1,3 +1,1 @@
-"""Model-agnostic request/answer types. Pure Python: no JAX import."""
-
-from __future__ import annotations
+"""Model-agnostic `system_one` protocol: question/answer types, request limits, answer decoding."""

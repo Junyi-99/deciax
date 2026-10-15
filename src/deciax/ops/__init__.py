@@ -1,4 +1,4 @@
-"""The only place where the backend forks."""
+"""Attention dispatch between the reference and Pallas kernels."""
 
 from __future__ import annotations
 

@@ -99,7 +99,6 @@ def build_sequence(
         qtype=QTYPES[q.type],
         state_stats={
             "state_tokens": len(state_ids),
-            "state_tokens_used": len(st),
             "state_tokens_dropped": len(state_ids) - len(st),
             "truncated": len(st) < len(state_ids),
         },

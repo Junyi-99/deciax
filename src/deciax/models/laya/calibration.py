@@ -20,8 +20,8 @@ def temp_bucket(qtype: QuestionType, k: int) -> str:
     return f"{qtype}:{size}"
 
 
-def clamp_temperature(t: object, lo: float = TEMP_MIN, hi: float = TEMP_MAX) -> float:
-    """`t` confined to [lo, hi]; 1.0 for anything that is not a finite number."""
+def clamp_temperature(t: object) -> float:
+    """`t` confined to [TEMP_MIN, TEMP_MAX]; 1.0 for anything that is not a finite number."""
     if isinstance(t, bool):
         return 1.0
 
@@ -33,19 +33,16 @@ def clamp_temperature(t: object, lo: float = TEMP_MIN, hi: float = TEMP_MAX) -> 
     if not math.isfinite(value):
         return 1.0
 
-    return min(hi, max(lo, value))
+    return min(TEMP_MAX, max(TEMP_MIN, value))
 
 
 class Calibration:
     def __init__(self, temperature: Sequence[object], temperature_by_options: Mapping[str, object]) -> None:
-        if len(temperature) != 3:
-            raise ValueError(f"temperature must have 3 entries, got {temperature!r}")
+        if len(temperature) != len(QTYPES):
+            raise ValueError(f"temperature must have {len(QTYPES)} entries, got {temperature!r}")
 
         self.temperature = [clamp_temperature(t) for t in temperature]
         self.temperature_by_options = {k: clamp_temperature(v) for k, v in temperature_by_options.items()}
 
-    def temperature_for(self, qtype: QuestionType, k: int, lang: str | None = None) -> float:
-        if lang is not None:
-            raise NotImplementedError("per-language temperatures")
-
+    def temperature_for(self, qtype: QuestionType, k: int) -> float:
         return self.temperature_by_options.get(temp_bucket(qtype, k), self.temperature[QTYPES[qtype]])

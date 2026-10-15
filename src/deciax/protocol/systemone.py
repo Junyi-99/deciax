@@ -6,9 +6,11 @@ laya/serve.py and laya/confidence.py (laya 0.4.4, Apache-2.0). Model-agnostic.
 
 from __future__ import annotations
 
+import json
 import math
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 MAX_BODY_BYTES = 2 * 1024 * 1024
@@ -18,6 +20,17 @@ MAX_BATCH_STATES = 64
 MAX_CHOICE_OPTIONS = 100
 MAX_SCORE_LEVELS = 32
 MAX_TOTAL_OPTIONS = 512
+
+
+@dataclass(frozen=True)
+class RequestLimits:
+    state_chars: int = MAX_STATE_CHARS
+    choice_options: int = MAX_CHOICE_OPTIONS
+    score_levels: int = MAX_SCORE_LEVELS
+
+
+DEFAULT_REQUEST_LIMITS = RequestLimits()
+
 
 LONE_SURROGATE_DETAIL = "request body contains an unpaired surrogate escape; those cannot be encoded as UTF-8"
 _LONE_SURROGATE = re.compile("[\ud800-\udfff]")
@@ -33,12 +46,10 @@ class RequestError(Exception):
 
 
 def _state_length(state: Any) -> int:
-    import json
-
     return len(state) if isinstance(state, str) else len(json.dumps(state, ensure_ascii=False))
 
 
-def check_request_limits(state: Any, questions: Any) -> None:
+def check_request_limits(state: Any, questions: Any, limits: RequestLimits = DEFAULT_REQUEST_LIMITS) -> None:
     """Refuse absent or oversized requests before tokenization (400 / 413 / 422)."""
     if state is None:
         raise RequestError(400, "'state' is required")
@@ -54,17 +65,17 @@ def check_request_limits(state: Any, questions: Any) -> None:
         crit, qtype = q.get("criteria"), q.get("type")
         if qtype == "choice" and isinstance(crit, (dict, list)):
             total += len(crit)
-            if len(crit) > MAX_CHOICE_OPTIONS:
+            if len(crit) > limits.choice_options:
                 raise RequestError(
                     413,
-                    f"too many choice options for {qid!r} ({len(crit)} > {MAX_CHOICE_OPTIONS})",
+                    f"too many choice options for {qid!r} ({len(crit)} > {limits.choice_options})",
                 )
         elif qtype == "score" and isinstance(crit, list):
             total += len(crit)
-            if len(crit) > MAX_SCORE_LEVELS:
+            if len(crit) > limits.score_levels:
                 raise RequestError(
                     413,
-                    f"too many score levels for {qid!r} ({len(crit)} > {MAX_SCORE_LEVELS})",
+                    f"too many score levels for {qid!r} ({len(crit)} > {limits.score_levels})",
                 )
             if None in crit:
                 raise RequestError(
@@ -79,18 +90,18 @@ def check_request_limits(state: Any, questions: Any) -> None:
         )
 
     length = _state_length(state)
-    if length > MAX_STATE_CHARS:
-        raise RequestError(413, f"state too large ({length} > {MAX_STATE_CHARS} chars)")
+    if length > limits.state_chars:
+        raise RequestError(413, f"state too large ({length} > {limits.state_chars} chars)")
 
 
-def check_batch_limits(states: Any, questions: Any) -> None:
+def check_batch_limits(states: Any, questions: Any, limits: RequestLimits = DEFAULT_REQUEST_LIMITS) -> None:
     if not isinstance(states, list) or not states:
         raise RequestError(400, "'states' must be a non-empty list")
     if len(states) > MAX_BATCH_STATES:
         raise RequestError(413, f"too many states in batch ({len(states)} > {MAX_BATCH_STATES})")
 
     for state in states:
-        check_request_limits(state, questions)
+        check_request_limits(state, questions, limits)
 
 
 def has_lone_surrogate(value: Any) -> bool:

@@ -1,11 +1,10 @@
-"""Text-only Clef checkpoint with request-level execution and tensor parallelism."""
+"""Text-only Clef checkpoint and tensor-parallel forward pass."""
 
 from __future__ import annotations
 
 import functools
 import json
-import threading
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -16,12 +15,12 @@ from numpy.typing import DTypeLike, NDArray
 from tokenizers import Tokenizer
 
 from deciax.models import ModelName
+from deciax.models.base import RequestEngine
 from deciax.models.clef import head, weights
-from deciax.models.clef.input import MAX_TOKENS, collate, decode, encode
+from deciax.models.clef.input import MAX_TOKENS
 from deciax.models.qwen3_5 import text
 from deciax.models.qwen3_5.config import TextConfig
 from deciax.protocol.systemone import MAX_BODY_BYTES, MAX_TOTAL_OPTIONS, RequestLimits
-from deciax.protocol.types import State
 
 
 class ClefModel:
@@ -55,10 +54,10 @@ class ClefModel:
         self._norm = jax.jit(lambda h, w: text.rms(h, w, self.config.rms_norm_eps))
         self._lexical = jax.jit(lambda w, ids, spans: head.means(w[ids], spans), out_shardings=self.replicated)
 
-        self._lock = threading.Lock()
+    def build_engine(self) -> RequestEngine:
+        from deciax.runtime.clef import ClefEngine
 
-    def build_engine(self) -> ClefModel:
-        return self
+        return ClefEngine(self)
 
     def forward(self, arrays: Mapping[str, NDArray[Any]]) -> jax.Array:
         a = jax.tree.map(lambda v: jax.device_put(v, self.replicated), arrays)
@@ -71,21 +70,3 @@ class ClefModel:
         lexical = self._lexical(self.top["lm_head"], a["lexical_ids"], a["lexical_spans"])
 
         return self._head(self.head, h, lexical, a)  # type: ignore[no-any-return]
-
-    def decide_batch(
-        self, states: Sequence[State], questions: Mapping[Any, Mapping[str, Any]], *, max_len: int | None = None, head_max_len: int | None = None
-    ) -> list[dict[str, Any]]:
-        if head_max_len is not None:
-            raise ValueError("Clef has one joint token budget; head_max_len is unsupported")
-
-        records = [encode(self.tokenizer, s, questions, self.max_token_budget if max_len is None else max_len) for s in states]
-        results: list[dict[str, Any]] = []
-
-        # Bound activation memory independently of the HTTP batch length.
-        for start in range(0, len(records), 2):
-            part = records[start : start + 2]
-            with self._lock:
-                logits = np.asarray(self.forward(collate(part, self.pad_token_id)), np.float32)
-            results.extend(decode(r, logits[i], questions, self.name) for i, r in enumerate(part))
-
-        return results

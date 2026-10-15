@@ -30,9 +30,9 @@ class LayaModel:
     max_token_budget = 1024
 
     def build_engine(self) -> RequestEngine:
-        from deciax.runtime.engine import Engine
+        from deciax.runtime.laya import LayaEngine
 
-        return Engine(self)
+        return LayaEngine(self)
 
     def __init__(self, path: Path, dtype: jnp.dtype = jnp.bfloat16, impl: ImplChoice = "auto") -> None:
         self.config = LayaConfig.from_dir(path)

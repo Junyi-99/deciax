@@ -15,7 +15,7 @@ from deciax.ops.backend import Impl
 from deciax.protocol.answers import softmax
 from deciax.protocol.output import DecisionOutput
 from deciax.protocol.types import parse_questions
-from deciax.runtime.engine import Engine
+from deciax.runtime.laya import LayaEngine
 from tests.conftest import LAYA_MODELS, checkpoint_dir, laya_fixture
 
 BF16_PROB_TOLERANCE = 0.02  # laya-tpu's acceptance: probability max-abs error vs PyTorch fp32
@@ -24,7 +24,7 @@ ROUNDING = 2e-4  # answers are rounded to 4 dp; fp32 noise can flip the last dig
 
 def _run(model: LayaModel, case: dict[str, Any]) -> DecisionOutput:
     rows = model.encode(case["state"], parse_questions(case["questions"]))
-    return Engine(model).run(rows)
+    return LayaEngine(model).run(rows)
 
 
 def _close(got: Any, want: Any, path: str = "") -> None:

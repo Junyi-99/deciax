@@ -1,4 +1,4 @@
-"""Runs encoded rows through a model in bucketed chunks."""
+"""Laya execution: encode each question as a row and run bucketed chunks."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from deciax.protocol.types import State, parse_questions
 from deciax.runtime.buckets import ROW_BUCKETS, collate
 
 
-class Engine:
+class LayaEngine:
     def __init__(self, model: DecisionModel) -> None:
         self.model = model
         self._lock = threading.Lock()

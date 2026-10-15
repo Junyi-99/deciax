@@ -76,15 +76,13 @@ Every flag also reads an environment variable: `DECIAX_HOST`, `DECIAX_PORT`, `DE
 ## Qwen3.5 decision models: Clef and Clef Flash
 
 `clef` (27B) and `clef-flash` (9B) use the same Qwen3.5 text backbone and Clef
-joint schema head. Their HF `architectures` value is
-`Qwen3_5ForConditionalGeneration`; deciax runs its language backbone plus the
-checkpoint's decision head. Vision weights are skipped during device loading.
+joint schema head. Vision weights are skipped during device loading.
 
 ```python
 import deciax
 
-model = deciax.load("clef")  # "clef-flash" uses the same adapter
-answer = model.decide(
+decider = deciax.load("clef")  # "clef-flash" uses the same adapter
+answer = decider.decide(
     {"review": "The package arrived broken."},
     {
         "refund": {"type": "noul", "instructions": "Should this customer receive a refund?"},
@@ -97,11 +95,6 @@ answer = model.decide(
     max_len=2048,
 )
 ```
-
-On a single-host v6e-4, BF16 weights use tensor parallelism across all four local
-devices. There is no generation loop or persistent KV cache. Each layer executable
-is reused across the model depth; the head evaluates every question jointly.
-`lm_head.weight` supplies lexical vectors for option tokens only.
 
 Clef currently supports:
 
@@ -117,21 +110,3 @@ Clef currently supports:
 
 Images, videos, `media_kwargs`, `head_max_len`, `labels`, and `option_order` are
 unsupported. Multimodal inference and PPLX's noncausal decision adapter are deferred.
-Clef uses the checkpoint's probability/confidence semantics, without Laya's act head
-or calibration. Runtime dependencies do not include PyTorch or Transformers.
-
-### Run on TPU
-
-From this checkout, install with `uv sync --extra tpu`.
-
-```sh
-# Clef 27B, BF16, all four local v6e devices; XLA implementation.
-# This cache is temporary and must have room for the approximately 55 GB release.
-HF_HOME=/dev/shm/deciax-clef-hf uv run python -m deciax.serve --model clef --dtype bf16 --port 8000
-```
-
-```sh
-# Clef 27B, text-only HTTP request.
-curl -s localhost:8000/v1/systemone -H 'Content-Type: application/json' -d \
-  '{"state":"The package arrived broken.","questions":{"refund":{"type":"noul","instructions":"Should this customer receive a refund?"}}}'
-```

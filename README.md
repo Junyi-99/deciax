@@ -1,4 +1,4 @@
-# deciax
+<p align="center"><img src="https://raw.githubusercontent.com/Junyi-99/deciax/main/docs/deciax.svg" alt="deciax" width="520"></p>
 
 [![PyPI Version](https://img.shields.io/pypi/v/deciax?color=3775A9&logo=pypi&logoColor=white)](https://pypi.org/project/deciax/)
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1sY_4BeRq_em4tzePW3poPyl-lGXyxO1g?usp=sharing)

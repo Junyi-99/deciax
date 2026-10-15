@@ -4,6 +4,6 @@ from __future__ import annotations
 
 from deciax.decider import Decider, load
 
-__version__ = "0.1.1.dev3"
+__version__ = "0.1.2"
 
 __all__ = ["Decider", "__version__", "load"]

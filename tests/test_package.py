@@ -6,7 +6,7 @@ from tests.conftest import FIXTURES
 
 
 def test_version() -> None:
-    assert deciax.__version__ == "0.1.1.dev3"
+    assert deciax.__version__ == "0.1.2"
 
 
 def test_registry_matches_fixture_manifest() -> None:

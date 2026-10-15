@@ -1,6 +1,6 @@
 [project]
 name = "deciax"
-version = "0.1.1.dev3"
+version = "0.1.2"
 description = "High-performance decision models on TPUs, powered by JAX and Pallas."
 keywords = ["decision-models", "jax", "pallas", "tpu"]
 readme = "README.md"

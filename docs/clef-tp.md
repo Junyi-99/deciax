@@ -41,20 +41,8 @@ The earlier diagnostic sweep measured 1.71%; neither sweep used interleaved repe
 
 ## Validation
 
+Validation used local test files retained outside this PR.
+
 CPU suite: 107 passed, 45 skipped; simulated TP1/2/4 collective tests: 12 passed, including uneven row counts and every replicated output shard. TPU fusion/collective tests: 23 passed. Type checking and relevant pre-commit hooks passed.
 
 The full Clef checkpoint passed B1/2/4/8 at S512 against saved JAX outputs: all predicted choices matched, maximum probability error 0.003049. Forward medians were 67.27/129.30/247.54/494.02 ms respectively; these correctness-run timings do not establish an end-to-end speedup. The checkpoint run recorded matching source hashes for all 49 source files.
-
-## Reproduction
-
-Collective correctness on one, two and four simulated CPU devices, including uneven row counts:
-
-```sh
-XLA_FLAGS=--xla_force_host_platform_device_count=4 uv run pytest tests/clef/test_parallel.py
-```
-
-TPU fusion and collective correctness:
-
-```sh
-PYTHONPATH=src python -m pytest tests/kernels/test_swiglu.py tests/clef/test_parallel.py
-```

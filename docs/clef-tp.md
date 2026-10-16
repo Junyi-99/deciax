@@ -24,7 +24,7 @@ This makes the collective stages explicit and lets the TPU compiler choose a ded
 
 ## Measurements
 
-Final PR revision, one sequential sweep on 2026-10-16, JAX 0.11.2, TPU v6e-4; synthetic BF16 MLP with R2048,D5120 and local F4352. Each configuration used four warmups and 15 host-synchronized measurements. All configurations used the same fused Pallas implementation and dot sizes.
+Measured revision `f5e8312`, one sequential sweep on 2026-10-16, JAX 0.11.2, TPU v6e-4; synthetic BF16 MLP with R2048,D5120 and local F4352. Each configuration used four warmups and 15 host-synchronized measurements. All configurations used the same fused Pallas implementation and dot sizes.
 
 | Logical mesh order | Collective | Median host-synchronized MLP time |
 |---|---|---:|
@@ -41,7 +41,7 @@ The earlier diagnostic sweep measured 1.71%; neither sweep used interleaved repe
 
 ## Validation
 
-Validation used local test files retained outside this PR.
+Validation used local test files retained outside this PR. After removing the legacy staged schedule and unused VMEM estimator, targeted CPU tests passed (9 passed, 4 TPU tests skipped), along with mypy on 49 source files and relevant pre-commit hooks. TPU measurements below predate this cleanup; they were not rerun.
 
 CPU suite: 107 passed, 45 skipped; simulated TP1/2/4 collective tests: 12 passed, including uneven row counts and every replicated output shard. TPU fusion/collective tests: 23 passed. Type checking and relevant pre-commit hooks passed.
 

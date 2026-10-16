@@ -8,12 +8,11 @@ import jax.numpy as jnp
 from jax.experimental import pallas as pl
 
 
-def blocked_dot(lhs: Any, rhs: Any, out: Any, *, add: bool = False) -> None:
+def blocked_dot(lhs: Any, rhs: Any, out: Any) -> None:
     """Multiply VMEM refs, retaining each output tile's FP32 K accumulator.
 
     Ref slices load only the active tile into registers. Results are written
-    to VMEM, never to an intermediate HBM buffer. `add` extends an existing
-    FP32 accumulator across the caller's intermediate-channel reduction.
+    to VMEM, never to an intermediate HBM buffer.
     """
     m, k = lhs.shape
     rk, n = rhs.shape
@@ -29,6 +28,6 @@ def blocked_dot(lhs: Any, rhs: Any, out: Any, *, add: bool = False) -> None:
             return acc + jnp.dot(lhs[row, inner], rhs[inner, col], preferred_element_type=jnp.float32)
 
         acc = jax.lax.fori_loop(0, k // bk, reduce_tile, jnp.zeros((bm, bn), jnp.float32))
-        out[row, col] = (out[row, col] + acc if add else acc).astype(out.dtype)
+        out[row, col] = acc.astype(out.dtype)
 
     jax.lax.fori_loop(0, (m // bm) * (n // bn), output_tile, None)

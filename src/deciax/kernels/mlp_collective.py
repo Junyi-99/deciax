@@ -1,4 +1,4 @@
-"""Experimental TP4 MLP with row-tile compute / reduce-scatter / all-gather overlap.
+"""Experimental TP2/TP4 MLP with row-tile compute / reduce-scatter / all-gather overlap.
 
 Remote transfers stay in VMEM. Capacity credits protect each two-slot receive
 buffer against a fast sender overtaking its consumer. No partial HBM output.
@@ -22,9 +22,11 @@ from deciax.kernels.swiglu import make_mlp_tile
 def mlp_reduce_scatter_all_gather(
     x: jax.Array, norm: jax.Array, gu: jax.Array, down: jax.Array, *, eps: float, rows: int = 512, overlap: bool = True
 ) -> jax.Array:
-    """Local TP4 shard -> replicated BF16 projection+residual, inside shard_map."""
-    if jax.lax.axis_size("tp") != 4:
-        raise ValueError("experimental collective requires TP4")
+    """Local TP2/TP4 shard -> replicated BF16 projection+residual, inside shard_map."""
+    num_devices = jax.lax.axis_size("tp")
+    if num_devices not in (2, 4):
+        raise ValueError("experimental collective requires TP2 or TP4")
+    num_peers = num_devices - 1
     num_rows, hidden = x.shape
     tile_rows = min(rows, (num_rows + 255) // 256 * 256)
     if tile_rows not in (256, 512) or hidden % 256:
@@ -32,7 +34,7 @@ def mlp_reduce_scatter_all_gather(
     num_weight_tiles, _, twice_f = gu.shape
     weight_tile_width = twice_f // 2
     x = jnp.pad(x, ((0, -num_rows % tile_rows), (0, 0)))
-    num_tiles, shard_rows = x.shape[0] // tile_rows, tile_rows // 4
+    num_tiles, shard_rows = x.shape[0] // tile_rows, tile_rows // num_devices
     compute_local_mlp = make_mlp_tile(tile_rows, hidden, weight_tile_width, num_weight_tiles, eps, 2)
 
     def kernel(
@@ -59,12 +61,12 @@ def mlp_reduce_scatter_all_gather(
     ) -> None:
         rank = jax.lax.axis_index("tp")
         barrier = pltpu.get_barrier_semaphore()
-        for peer_offset in range(1, 4):
+        for peer_offset in range(1, num_devices):
             pl.semaphore_signal(barrier, 1, device_id={"tp": rank ^ peer_offset})
-        pl.semaphore_wait(barrier, 3)
+        pl.semaphore_wait(barrier, num_peers)
         pltpu.async_copy(norm_ref, norm_tile, local_dma_done).wait()  # type: ignore[no-untyped-call]
 
-        # XOR offsets 1/2/3 enumerate the other ranks symmetrically. Scatter
+        # XOR offsets enumerate the other ranks symmetrically for TP2/TP4. Scatter
         # inboxes are indexed by peer_offset-1; gather inboxes by source rank.
         def scatter_transfer(tile: Any, peer_offset: int) -> Any:
             slot, peer = tile % 2, rank ^ peer_offset
@@ -99,7 +101,7 @@ def mlp_reduce_scatter_all_gather(
         # Slots 0/1 start free; tile t>=2 waits for the credit from tile t-2.
         def start_scatter(tile: Any) -> None:
             with jax.named_scope("reduce_scatter_start"):
-                for peer_offset in range(1, 4):
+                for peer_offset in range(1, num_devices):
 
                     @pl.when(tile >= 2)
                     def wait_for_free_slot(peer_offset: int = peer_offset) -> None:
@@ -110,7 +112,7 @@ def mlp_reduce_scatter_all_gather(
         def reduce_and_start_gather(tile: Any) -> None:
             with jax.named_scope("reduce_scatter_finish_all_gather_start"):
                 slot = tile % 2
-                for peer_offset in range(1, 4):
+                for peer_offset in range(1, num_devices):
                     scatter_transfer(tile, peer_offset).wait()
 
                 # Canonical source-rank order, with a single final BF16 cast.
@@ -122,9 +124,9 @@ def mlp_reduce_scatter_all_gather(
                     )
                     return acc + value
 
-                local_shards[slot] = jax.lax.fori_loop(0, 4, add_source, jnp.zeros((shard_rows, hidden), jnp.float32)).astype(jnp.bfloat16)
+                local_shards[slot] = jax.lax.fori_loop(0, num_devices, add_source, jnp.zeros((shard_rows, hidden), jnp.float32)).astype(jnp.bfloat16)
                 # Only release credits that a future tile will consume.
-                for peer_offset in range(1, 4):
+                for peer_offset in range(1, num_devices):
 
                     @pl.when(tile + 2 < num_tiles)
                     def release_slot(peer_offset: int = peer_offset) -> None:
@@ -135,13 +137,13 @@ def mlp_reduce_scatter_all_gather(
                         pl.semaphore_wait(all_gather_slot_free.at[slot, peer_offset - 1], 1)
 
                 all_gather_inbox[slot, rank] = local_shards[slot]
-                for peer_offset in range(1, 4):
+                for peer_offset in range(1, num_devices):
                     gather_transfer(tile, peer_offset).start()
 
         def finish_gather_and_store(tile: Any) -> None:
             with jax.named_scope("all_gather_finish_store"):
                 slot = tile % 2
-                for peer_offset in range(1, 4):
+                for peer_offset in range(1, num_devices):
                     gather_transfer(tile, peer_offset).wait_send()
                     gather_transfer(tile, peer_offset, incoming=True).wait_recv()
                 # Reuse local staging after compute; residual is original BF16.
@@ -152,10 +154,10 @@ def mlp_reduce_scatter_all_gather(
                         jnp.bfloat16
                     )
 
-                jax.lax.fori_loop(0, 4, residual, None)
+                jax.lax.fori_loop(0, num_devices, residual, None)
                 pltpu.async_copy(input_tile, output_ref.at[pl.ds(tile * tile_rows, tile_rows), :], local_dma_done).wait()  # type: ignore[no-untyped-call]
                 # Only release credits that a future tile will consume.
-                for peer_offset in range(1, 4):
+                for peer_offset in range(1, num_devices):
 
                     @pl.when(tile + 2 < num_tiles)
                     def release_slot(peer_offset: int = peer_offset) -> None:
@@ -202,14 +204,14 @@ def mlp_reduce_scatter_all_gather(
                 pltpu.VMEM((tile_rows, hidden), jnp.bfloat16),
                 pltpu.VMEM((tile_rows, num_weight_tiles * weight_tile_width), jnp.bfloat16),
                 pltpu.VMEM((2, tile_rows, hidden), jnp.float32),  # partials: [slot, row, hidden]
-                pltpu.VMEM((2, 3, shard_rows, hidden), jnp.float32),  # reduce_scatter_inbox: [slot, peer_offset-1, owned row, hidden]
+                pltpu.VMEM((2, num_peers, shard_rows, hidden), jnp.float32),  # reduce_scatter_inbox: [slot, peer_offset-1, owned row, hidden]
                 pltpu.VMEM((2, shard_rows, hidden), jnp.bfloat16),  # local_shards: FP32 sum, then BF16 cast
-                pltpu.VMEM((2, 4, shard_rows, hidden), jnp.bfloat16),  # all_gather_inbox: [slot, source rank, owned row, hidden]
-                *[pltpu.SemaphoreType.DMA((2, 3)) for _ in range(4)],
-                *[pltpu.SemaphoreType.REGULAR((2, 3)) for _ in range(2)],
+                pltpu.VMEM((2, num_devices, shard_rows, hidden), jnp.bfloat16),  # all_gather_inbox: [slot, source rank, owned row, hidden]
+                *[pltpu.SemaphoreType.DMA((2, num_peers)) for _ in range(4)],
+                *[pltpu.SemaphoreType.REGULAR((2, num_peers)) for _ in range(2)],
                 pltpu.SemaphoreType.DMA,
             ],
         ),
         compiler_params=pltpu.CompilerParams(collective_id=0, vmem_limit_bytes=127 * 1024**2),
-        name=f"clef_mlp_tp4_{'overlap' if overlap else 'serial'}_m{tile_rows}",
+        name=f"clef_mlp_tp{num_devices}_{'overlap' if overlap else 'serial'}_m{tile_rows}",
     )(x, norm.reshape(1, hidden), gu, down)[:num_rows]

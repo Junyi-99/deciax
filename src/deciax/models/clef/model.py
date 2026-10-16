@@ -11,6 +11,7 @@ from typing import Any
 import jax
 import jax.numpy as jnp
 import numpy as np
+from jax.experimental import mesh_utils
 from jax.sharding import Mesh, NamedSharding
 from numpy.typing import DTypeLike, NDArray
 from tokenizers import Tokenizer
@@ -58,7 +59,7 @@ class ClefModel:
         devices = jax.local_devices()
         if len(devices) not in (1, 2, 4):
             raise ValueError("Clef supports one host with 1, 2, or 4 local devices")
-        mesh = Mesh(np.asarray(devices), ("tp",))
+        mesh = Mesh(mesh_utils.create_device_mesh((len(devices),), devices=devices), ("tp",))
         self.replicated = NamedSharding(mesh, weights.REPLICATED)
 
         self.top, self.layers, self.head = weights.load(path, self.config, dtype, mesh)

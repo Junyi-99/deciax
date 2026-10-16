@@ -1,0 +1,222 @@
+{
+  "impl": "pallas",
+  "jax": "0.11.2",
+  "devices": [
+    "TPU_0(process=0,(0,0,0,0))",
+    "TPU_1(process=0,(1,0,0,0))",
+    "TPU_2(process=0,(0,1,0,0))",
+    "TPU_3(process=0,(1,1,0,0))"
+  ],
+  "projection_rows": 512,
+  "mlp_rows": 512,
+  "mlp_chain_steps": 20,
+  "rows": [
+    {
+      "batch": 1,
+      "sequence": 512,
+      "cold_s": 9.003890300984494,
+      "input_hash": "8835928404f529d6f7504e42bf3654c41dc446d574a67ccaf5f62ca12aabd7a8",
+      "forward": {
+        "median_ms": 67.27069499902427,
+        "samples_ms": [
+          67.28919502347708,
+          67.49385502189398,
+          67.30461400002241,
+          67.26242502918467,
+          67.27069499902427,
+          67.27616500575095,
+          67.22844502655789,
+          67.22619495121762,
+          67.24382401444018
+        ]
+      },
+      "max_probability_error": 0.002901017665863037,
+      "argmax_match": true,
+      "requests_per_second": 14.86531393817924,
+      "tokens_per_second": 7611.040736347771,
+      "mlp": {
+        "median_ms": 7.055979978758842,
+        "samples_ms": [
+          7.0917989942245185,
+          7.074289955198765,
+          7.074869005009532,
+          7.052959990687668,
+          7.069909013807774,
+          7.055979978758842,
+          7.052478962577879,
+          7.054799993056804,
+          7.052598986774683
+        ],
+        "median_us_per_call": 352.7989989379421
+      }
+    },
+    {
+      "batch": 2,
+      "sequence": 512,
+      "cold_s": 8.77229775901651,
+      "input_hash": "a3ea0d04c67cbc2d00c95a8d945d0b0b8405eeebb44af62864fadcf401cc6447",
+      "forward": {
+        "median_ms": 129.30386001244187,
+        "samples_ms": [
+          129.36072994489223,
+          129.49579005362466,
+          129.32157004252076,
+          129.28988999919966,
+          129.29662002716213,
+          129.30386001244187,
+          129.31868998566642,
+          129.3031899840571,
+          129.29521000478417
+        ]
+      },
+      "max_probability_error": 0.0004094615578651428,
+      "argmax_match": true,
+      "requests_per_second": 15.467442347100512,
+      "tokens_per_second": 7919.330481715462,
+      "mlp": {
+        "median_ms": 13.909389032050967,
+        "samples_ms": [
+          13.946229009889066,
+          13.910169014707208,
+          13.909389032050967,
+          13.916149036958814,
+          13.886869011912495,
+          13.903258019126952,
+          13.911449001170695,
+          13.901578960940242,
+          13.88632896123454
+        ],
+        "median_us_per_call": 695.4694516025484
+      }
+    },
+    {
+      "batch": 4,
+      "sequence": 512,
+      "cold_s": 11.030185695970431,
+      "input_hash": "837600004bd44bf5ee6ad561086e3deb5f924a326d535e7da6f500cd0ff7bdbe",
+      "forward": {
+        "median_ms": 247.5381309632212,
+        "samples_ms": [
+          247.63297103345394,
+          247.71636095829308,
+          247.52805096795782,
+          247.52535100560635,
+          247.5311110028997,
+          247.58511100662872,
+          247.5381309632212,
+          247.542570985388,
+          247.51669098623097
+        ]
+      },
+      "max_probability_error": 0.0015090703964233398,
+      "argmax_match": true,
+      "requests_per_second": 16.159126613888482,
+      "tokens_per_second": 8273.472826310903,
+      "mlp": {
+        "median_ms": 26.01024799514562,
+        "samples_ms": [
+          26.026127045042813,
+          26.01024799514562,
+          26.015627954620868,
+          25.990598020143807,
+          26.00960899144411,
+          26.012387999799103,
+          26.01382799912244,
+          25.997127988375723,
+          26.008007989730686
+        ],
+        "median_us_per_call": 1300.512399757281
+      }
+    },
+    {
+      "batch": 8,
+      "sequence": 512,
+      "cold_s": 12.282256399979815,
+      "input_hash": "ed06fc449027b4a72d769644fddc27532d870e4cabf267b09e388d979aa97552",
+      "forward": {
+        "median_ms": 494.02242194628343,
+        "samples_ms": [
+          494.1345719853416,
+          494.33638202026486,
+          494.06591203296557,
+          494.0077119972557,
+          493.9986030221917,
+          494.0028919954784,
+          494.02242194628343,
+          493.9984419615939,
+          494.0457319607958
+        ]
+      },
+      "max_probability_error": 0.0030486509203910828,
+      "argmax_match": true,
+      "requests_per_second": 16.193596979834783,
+      "tokens_per_second": 8291.12165367541,
+      "mlp": {
+        "median_ms": 51.68064602185041,
+        "samples_ms": [
+          51.68986599892378,
+          51.67697597062215,
+          51.68064602185041,
+          51.64523597341031,
+          51.69192602625117,
+          51.69063602807,
+          51.663435995578766,
+          51.690516993403435,
+          51.66782601736486
+        ],
+        "median_us_per_call": 2584.0323010925204
+      }
+    }
+  ],
+  "source_sha256": {
+    "src/deciax/nn.py": "e5576c4def0b6562b63bb8d184d91bea604ce190aca6e07acb4a2290ec51c916",
+    "src/deciax/decider.py": "7cd8089028828d4e5daf93764c290f2646115e7f903c222ae76bfdc16d92e0bc",
+    "src/deciax/__init__.py": "10dfdf2d757456a157be3b280d349552388140320d74c1010de435aad1020ee3",
+    "src/deciax/runtime/clef.py": "1dc4ee73957d9fb8f9638abe07931e5a6fca2edf8f44507b21396e147d51c830",
+    "src/deciax/runtime/laya.py": "ea904699eed5432a6092da9407609095024cf6ab0d389fe06552ca794741ecd8",
+    "src/deciax/runtime/buckets.py": "f4f50a1b103748ec6d30f9ecdfd4e437c6c5e70c49bcdf1a40951c2fe7fac37d",
+    "src/deciax/runtime/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/deciax/protocol/systemone.py": "fcd89abfa67f8e29aa00b7c9e59f4eecf76910fa5cc994fdace9e78443b230f2",
+    "src/deciax/protocol/answers.py": "a0f1976e218e9d5a9ba6e536b6261ba3506078e265e2ab4f3699bea4ccb9d494",
+    "src/deciax/protocol/output.py": "d10b9b70e77c8fd725acf036212f0fc71abc198014ad2661d7865fa8d93aba2b",
+    "src/deciax/protocol/types.py": "567b717b98a35c6447fb9f0197b79a31a8d87704b9b26ee8c95e9c5549826ab5",
+    "src/deciax/protocol/__init__.py": "3b026781b56036ae59e1bccf5173282643cf7478dc306133652558cfcffb1eff",
+    "src/deciax/kernels/matmul.py": "838830ef5d1f0fe797c0986d83be3fd2d15411af2399a5bf9662ae826729ddfa",
+    "src/deciax/kernels/fused.py": "59a5886fd55ed95bddfda42eba66e0f739e6c1942f03162221b3eeccf1478f0c",
+    "src/deciax/kernels/swiglu.py": "504bfeffe2ff58b193a11f39938532f1ba52dd28b1d0ada0bb8bc05e703aca2c",
+    "src/deciax/kernels/projection.py": "cfe1bf33c2b30fafa32450c34f1a1292bcd80ae4d4632b5d79540509e97bf88d",
+    "src/deciax/kernels/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/deciax/models/modernbert.py": "629dd0c05e0d8a5c09f8b0a996dbbbc10f08e0160d4ba94698f18a7675c414bb",
+    "src/deciax/models/base.py": "b9cacf1436cae59c96063cc56c431fad48f109f8b84853de4194bacb59506055",
+    "src/deciax/models/__init__.py": "0421bb7f14c61de9760f8522bca18a880b97ed15c5f28514af569806d9e34157",
+    "src/deciax/ops/backend.py": "e3c379255370af167b71636e4406eb3aa5e224cf9ae408066559b7859ac34b39",
+    "src/deciax/ops/__init__.py": "adc05240b3f93967c7d282dc5c0342de47a2abe3757819ea234a4c2b8040c9d6",
+    "src/deciax/serve/app.py": "05e1737e335dd880370080740378889c1d4216c3428a9f86cf9b34deacc22ea0",
+    "src/deciax/serve/__main__.py": "cbb512e58a970f00e1554376c817f04210ac0b6edcfa1587fc861b9aec86f595",
+    "src/deciax/serve/__init__.py": "dbea658a10335a5ef3e0dd22835c79a436e2d4669079d615d69708ac98b544a8",
+    "src/deciax/kernels/attention/reference.py": "792223fcfd7d86cd53817f3b958dc7b3573fd9628140124674ccc4b791d99ef4",
+    "src/deciax/kernels/attention/blocked.py": "1d8e5fa065cdd5c1cb7cdaa5d427c9dcdaa83f47a73265bf1386fb674cb95ec2",
+    "src/deciax/kernels/attention/pallas.py": "718625c8e0ab9308dd2d50397972b9a66b1740cbbb51b65272dfb2c965448256",
+    "src/deciax/kernels/attention/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/deciax/kernels/gdn/reference.py": "aeab31a1799587e02b5d75922e0839c66fab4d371b53ccf7d2a91a701ac35672",
+    "src/deciax/kernels/gdn/__init__.py": "a434efa228b6991f7b658c5c4990128c02fed432482a91526c409a27f68a1d74",
+    "src/deciax/models/qwen3_5/config.py": "6d6c42caf767f6a212c5c57278458e6101c3fa45fb64a00c0c0b2a2409b381f6",
+    "src/deciax/models/qwen3_5/parallel.py": "edfcae7517dea20b73a55965cddcc7cf59c0c1ec7446e5b5faae12cc056fe9f4",
+    "src/deciax/models/qwen3_5/pallas.py": "0927938792e6cda40d68ff4982e165ec3f49e8c706065c2308163ec0c055bed8",
+    "src/deciax/models/qwen3_5/text.py": "3df049c6b8dec9ce2f0273911f0202ef4846ccb64c15f1f037f423ca45dd20b5",
+    "src/deciax/models/qwen3_5/__init__.py": "3976422446d8d2d0e9f3afc804fc96f40a946c2dfc80f132ff8e05c47e9b8281",
+    "src/deciax/models/laya/input.py": "1029752c0df4e61c093f2795473920ad77dee2d1481701b33536c4480f0017f0",
+    "src/deciax/models/laya/model.py": "45b5aaa1b9c71129543de65c5a92476674a26b074db962b0040dd5f39fbf7f38",
+    "src/deciax/models/laya/weights.py": "55dd235991a7d16814dff1db133d98e33eede488cc63dfddd9c0b49fe1ccb7df",
+    "src/deciax/models/laya/tokenizer.py": "b3059a39b4b46f1ed42808d8c88bc506869f40e16b31e19c42dfaf81007e3d51",
+    "src/deciax/models/laya/config.py": "b1dc463bf2a47589eea04ce09e7bf2d860e21b0836302612f4fa81dbfdd57d37",
+    "src/deciax/models/laya/heads.py": "bc593d680929f7a05ed93b28296c56d0da6c867492391e9132ec36922467403d",
+    "src/deciax/models/laya/calibration.py": "54b23d8d56f623f3f487fa35ac84e8e4eae08786d9160953889a12c1b9dd0ab6",
+    "src/deciax/models/laya/__init__.py": "a719faf4b82689f9ee744d835f78e481c46c17f313a381343f8b2cd8ca60a80e",
+    "src/deciax/models/clef/input.py": "32ddd54b16dda859b4e57f2f4bc23b505d6b54ef1b13aab57dee5566de42b938",
+    "src/deciax/models/clef/model.py": "8ee6fdea806fb84560f5399adae8d362aace2efa31f811ed0fa4070177c5bd9a",
+    "src/deciax/models/clef/weights.py": "27566bb57b508ccffd983bb6a0ac29134f087900771bdfed5a8d7937db59ce8b",
+    "src/deciax/models/clef/head.py": "5da03ceadfb58041ffc95354e04a5a0971b0236483426271fb3170df70b60de9",
+    "src/deciax/models/clef/__init__.py": "42babb38ae5752ebb2dc8045bc0135dcb15c1c1de14088eca1cce3c711e5cc85"
+  }
+}

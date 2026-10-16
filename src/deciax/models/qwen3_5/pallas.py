@@ -17,6 +17,7 @@ from deciax.kernels.swiglu import MlpTiling, fused_mlp_partial, pack
 from deciax.models.clef.weights import spec
 from deciax.models.qwen3_5 import text
 from deciax.models.qwen3_5.config import TextConfig
+from deciax.models.qwen3_5.parallel import sum_rows
 from deciax.nn import linear
 
 LINEAR_PROJECTIONS = ("q", "k", "v", "in_proj_z", "in_proj_a", "in_proj_b")
@@ -62,8 +63,8 @@ def mlp(x: jax.Array, p: Mapping[str, jax.Array], *, eps: float, mesh: Mesh, til
         partial = fused_mlp_partial(x.reshape(-1, x.shape[-1]), n, gu, down, eps=eps, tiling=tiling)
         # Preserve dense() semantics: sum all TP shards in FP32, then cast,
         # then add the BF16 residual. Never round each shard independently.
-        projected = jax.lax.psum(partial, "tp").astype(x.dtype).reshape(x.shape)  # type: ignore[no-untyped-call]
-        return (x + projected).astype(x.dtype)  # type: ignore[no-any-return]
+        projected = sum_rows(partial, axis_size=mesh.size).astype(x.dtype).reshape(x.shape)
+        return (x + projected).astype(x.dtype)
 
     return jax.shard_map(
         local,

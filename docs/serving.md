@@ -6,6 +6,14 @@ Start one or more models; `--default-model` selects the model for requests that 
 python -m deciax.serve --model laya --model laya-multilingual --default-model laya-multilingual --port 8000
 ```
 
+For the experimental Clef BF16 TPU backend (validated on v6e-4):
+
+```sh
+python -m deciax.serve --model clef --dtype bf16 --impl pallas --port 8000
+```
+
+See [kernel layout, VMEM measurements and benchmarks](clef-pallas.md).
+
 ## Authentication
 
 Set `DECIAX_API_KEY` on the server and send `Authorization: Bearer <key>` with requests.

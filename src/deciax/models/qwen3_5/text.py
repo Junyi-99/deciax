@@ -41,35 +41,45 @@ def causal_conv(x: jax.Array, weight: jax.Array) -> jax.Array:
 
 def delta_net(p: Mapping[str, jax.Array], x: jax.Array, mask: jax.Array, c: TextConfig) -> jax.Array:
     x = x * mask[..., None].astype(x.dtype)
-    b, s, _ = x.shape
+    projections = {n: dense(x, p, n) for n in ("q", "k", "v", "in_proj_a", "in_proj_b", "in_proj_z")}
+    return dense(delta_net_core(p, projections, c), p, "out_proj")
+
+
+def delta_net_core(p: Mapping[str, jax.Array], projections: Mapping[str, jax.Array], c: TextConfig) -> jax.Array:
+    """Convolution, gated recurrence and output gate, before the TP down sum."""
+    b, s, _ = projections["q"].shape
+    dtype = projections["q"].dtype
     nh, nv, dk, dv = c.linear_num_key_heads, c.linear_num_value_heads, c.linear_key_head_dim, c.linear_value_head_dim
 
-    q, k, v = [causal_conv(dense(x, p, n), p[n + ".conv"]) for n in ("q", "k", "v")]
+    q, k, v = [causal_conv(projections[n], p[n + ".conv"]) for n in ("q", "k", "v")]
     q, k, v = q.reshape(b, s, nh, dk), k.reshape(b, s, nh, dk), v.reshape(b, s, nv, dv)
     q, k = jnp.repeat(q, nv // nh, axis=2), jnp.repeat(k, nv // nh, axis=2)
 
-    a, beta = dense(x, p, "in_proj_a"), jax.nn.sigmoid(dense(x, p, "in_proj_b"))
+    a, beta = projections["in_proj_a"], jax.nn.sigmoid(projections["in_proj_b"])
     g = -jnp.exp(p["A_log"].astype(jnp.float32)) * jax.nn.softplus(a.astype(jnp.float32) + p["dt_bias"].astype(jnp.float32))
     out = chunked(q, k, v, g, beta)
 
-    z = dense(x, p, "in_proj_z").reshape(out.shape)
+    z = projections["in_proj_z"].reshape(out.shape)
     # RMSNormGated rounds normalization before multiplying norm weight, then
     # applies the SiLU gate in float32 (Transformers reference ordering).
     norm = out.astype(jnp.float32) * jax.lax.rsqrt(jnp.mean(out.astype(jnp.float32) ** 2, -1, keepdims=True) + c.rms_norm_eps)
-    norm = (norm.astype(x.dtype) * p["norm.weight"]).astype(x.dtype)
-    out = (norm.astype(jnp.float32) * jax.nn.silu(z.astype(jnp.float32))).astype(x.dtype).reshape(b, s, nv * dv)
-
-    return dense(out, p, "out_proj")
+    norm = (norm.astype(dtype) * p["norm.weight"]).astype(dtype)
+    return (norm.astype(jnp.float32) * jax.nn.silu(z.astype(jnp.float32))).astype(dtype).reshape(b, s, nv * dv)
 
 
 def full_attention(p: Mapping[str, jax.Array], x: jax.Array, mask: jax.Array, c: TextConfig) -> jax.Array:
-    b, s, _ = x.shape
+    projections = {n: dense(x, p, n) for n in ("q_proj", "k_proj", "v_proj")}
+    return dense(full_attention_core(p, projections, mask, c), p, "o_proj")
+
+
+def full_attention_core(p: Mapping[str, jax.Array], projections: Mapping[str, jax.Array], mask: jax.Array, c: TextConfig) -> jax.Array:
+    b, s, _ = projections["q_proj"].shape
     nh, nk, d = c.num_attention_heads, c.num_key_value_heads, c.head_dim
 
-    raw = dense(x, p, "q_proj").reshape(b, s, nh, 2 * d)
+    raw = projections["q_proj"].reshape(b, s, nh, 2 * d)
     q, gate = raw[..., :d], raw[..., d:]
-    k = dense(x, p, "k_proj").reshape(b, s, nk, d)
-    v = dense(x, p, "v_proj").reshape(b, s, nk, d)
+    k = projections["k_proj"].reshape(b, s, nk, d)
+    v = projections["v_proj"].reshape(b, s, nk, d)
     q, k = rms(q, p["q_norm.weight"], c.rms_norm_eps), rms(k, p["k_norm.weight"], c.rms_norm_eps)
 
     rot = int(d * c.partial_rotary_factor)
@@ -78,7 +88,7 @@ def full_attention(p: Mapping[str, jax.Array], x: jax.Array, mask: jax.Array, c:
     k = jnp.concatenate((apply_rope(k[..., :rot], inv), k[..., rot:]), axis=-1)
 
     out = attention(q, k, v, mask, causal=True)
-    return dense((out * jax.nn.sigmoid(gate)).reshape(b, s, nh * d), p, "o_proj")
+    return (out * jax.nn.sigmoid(gate)).reshape(b, s, nh * d)
 
 
 def layer(p: Mapping[str, jax.Array], x: jax.Array, mask: jax.Array, *, config: TextConfig, linear_attention: bool) -> jax.Array:

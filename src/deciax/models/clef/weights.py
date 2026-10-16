@@ -57,7 +57,7 @@ def layer_weights(raw: Mapping[str, NDArray[Any]], c: TextConfig) -> dict[str, N
     return out
 
 
-def spec(name: str, array: NDArray[Any]) -> P:
+def spec(name: str, array: NDArray[Any] | jax.Array) -> P:
     if name.endswith(("out_proj.weight", "o_proj.weight", "down_proj.weight")):
         return COLUMNS
     if array.ndim == 2 or name.endswith(".conv"):

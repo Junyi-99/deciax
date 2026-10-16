@@ -1,0 +1,28 @@
+name: PR title
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions: {}
+
+jobs:
+  title:
+    name: Conventional PR title
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Validate title
+        shell: python
+        run: |
+          import json
+          import os
+          import re
+
+          with open(os.environ["GITHUB_EVENT_PATH"]) as event_file:
+              title = json.load(event_file)["pull_request"]["title"]
+          pattern = r"(?:feat|fix|perf|refactor|docs|test|chore|ci|build|style|revert)(?:\([a-z0-9][a-z0-9._/-]*\))?!?: \S(?:[^\r\n]*\S)?"
+          if not re.fullmatch(pattern, title) or title.endswith((".", ";")):
+              print("::error::Use type(scope): description, e.g. fix(clef): handle empty input. Scope is optional; omit trailing periods and semicolons.")
+              raise SystemExit(1)
+          print("PR title follows Conventional Commits")

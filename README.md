@@ -70,4 +70,4 @@ See [HTTP deployment and compatibility](docs/serving.md) for authentication, bat
 - `max_len` sets the total token budget (default and maximum: 16,384), including
   the prompt and schema. Excess state is truncated from the right; an oversized schema is rejected.
 - `head_max_len`, `labels`, `option_order`, images, videos, and `media_kwargs` are unsupported.
-- Use the default `impl="auto"` or `impl="jax"`; `impl="pallas"` is unsupported.
+- `impl="auto"` uses JAX. Experimental `impl="pallas"` fuses input projections and MLPs on BF16 TPUs; see [Clef Pallas measurements](docs/clef-pallas.md).

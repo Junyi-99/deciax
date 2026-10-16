@@ -79,8 +79,6 @@ def load(
     if ckpt.family == "laya":
         return Decider(LayaModel(path, jdtype, impl))
 
-    if impl not in ("auto", "jax"):
-        raise ValueError("Clef currently supports auto/jax kernels")
     from deciax.models.clef.model import ClefModel
 
-    return Decider(ClefModel(path, jdtype, model))
+    return Decider(ClefModel(path, jdtype, model, impl=impl))

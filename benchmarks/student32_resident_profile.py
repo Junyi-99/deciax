@@ -30,8 +30,9 @@ def main():
     ap.add_argument("--steps", type=int, default=10)
     ap.add_argument("--modes", nargs="+", choices=("TRACE_COMPUTE", "TRACE_COMPUTE_AND_SYNC"), default=["TRACE_COMPUTE_AND_SYNC"])
     ap.add_argument("--backends", nargs="+", choices=("jax", "pallas", "vmem"), default=["jax", "pallas", "vmem"])
-    ap.add_argument("--embed-group", type=int, default=1)
-    ap.add_argument("--head-group", type=int, default=1)
+    ap.add_argument("--embed-group", type=int, choices=(1, 8, 16, 32, 64, 128), default=8)
+    ap.add_argument("--head-group", type=int, choices=(1, 2, 3, 4, 6), default=6)
+    ap.add_argument("--pv-transposed", action=argparse.BooleanOptionalAction, default=True)
     args = ap.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "environment.json").write_text(
@@ -43,6 +44,7 @@ def main():
                 "steps": args.steps,
                 "embed_group": args.embed_group,
                 "head_group": args.head_group,
+                "pv_transposed": args.pv_transposed,
             },
             indent=2,
         )
@@ -85,11 +87,20 @@ def main():
     masks = jnp.stack([a["attention_mask"] for a in stream])
     data = prepare(model, 128)
     inputs = (meta, masks, *data.values())
-    fn = build(data, 128, len(stream), 80, stream=True, embed_group=args.embed_group, head_group=args.head_group)
+    fn = build(
+        data,
+        128,
+        len(stream),
+        80,
+        stream=True,
+        embed_group=args.embed_group,
+        head_group=args.head_group,
+        pv_transposed=args.pv_transposed,
+    )
     vm = fn.lower(*inputs).compile()
     (args.out / "vmem.hlo.txt").write_text(vm.as_text())
     actual = np.asarray(vm(*inputs))
-    original = build(data, 128, len(stream), 80, stream=True).lower(*inputs).compile()
+    original = build(data, 128, len(stream), 80, stream=True, embed_group=1, head_group=1, pv_transposed=False).lower(*inputs).compile()
     original_output = np.asarray(original(*inputs))
     # Reordering must preserve all output lanes, including the action head.
     np.testing.assert_array_equal(actual, original_output)

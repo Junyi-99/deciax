@@ -1,0 +1,104 @@
+{
+  "interpretation": "LLO instruction intervals are interpolated estimates, not hardware busy counters. Mean per-MXU coverage and either-MXU coverage are distinct; neither is MFU.",
+  "module_count": 3,
+  "forward_count": 27,
+  "warm_count": 24,
+  "scopes": {
+    "warm_forwards": {
+      "count": 24,
+      "duration_total_us": 632.3275780000004,
+      "duration_p50_us": 26.370039,
+      "unit_coverage_fraction": {
+        "SALU Instructions": 0.013527088321045598,
+        "VALU Instructions": 0.22566008801968584,
+        "EUP Instructions": 0.02669047116781873,
+        "XLU Instructions": 0.11611373996354173,
+        "VLD Instructions": 0.12459759575734013,
+        "VST Instructions": 0.0484818993296795,
+        "MXU0 Instructions": 0.223820762968858,
+        "MXU1 Instructions": 0.2086870295529056
+      },
+      "mxu_mean_coverage_fraction": 0.21625389626088182,
+      "mxu_either_coverage_fraction": 0.331977070503613,
+      "mxu_both_coverage_fraction": 0.10053072201815057,
+      "mxu_neither_coverage_fraction": 0.668022929496387,
+      "sync_wait_overlap_us": 0.0
+    },
+    "all_forwards": {
+      "count": 27,
+      "duration_total_us": 711.7173440000006,
+      "duration_p50_us": 26.381328,
+      "unit_coverage_fraction": {
+        "SALU Instructions": 0.013494740680184884,
+        "VALU Instructions": 0.22559372656970123,
+        "EUP Instructions": 0.026672760117400208,
+        "XLU Instructions": 0.11612292949698955,
+        "VLD Instructions": 0.12458314763718271,
+        "VST Instructions": 0.048465254174730625,
+        "MXU0 Instructions": 0.22379206055775488,
+        "MXU1 Instructions": 0.20863711584894876
+      },
+      "mxu_mean_coverage_fraction": 0.21621458820335182,
+      "mxu_either_coverage_fraction": 0.3319499910006562,
+      "mxu_both_coverage_fraction": 0.10047918540604747,
+      "mxu_neither_coverage_fraction": 0.6680500089993437,
+      "sync_wait_overlap_us": 0.0
+    },
+    "complete_kernels": {
+      "count": 3,
+      "duration_total_us": 858.0178119999982,
+      "duration_p50_us": 285.93,
+      "unit_coverage_fraction": {
+        "SALU Instructions": 0.013131237879124598,
+        "VALU Instructions": 0.18751532852446062,
+        "EUP Instructions": 0.02212479242552748,
+        "XLU Instructions": 0.09635943776780509,
+        "VLD Instructions": 0.1033615336455086,
+        "VST Instructions": 0.040201452108693865,
+        "MXU0 Instructions": 0.18568658682861916,
+        "MXU1 Instructions": 0.17306243748682756
+      },
+      "mxu_mean_coverage_fraction": 0.17937451215772335,
+      "mxu_either_coverage_fraction": 0.2754025273496286,
+      "mxu_both_coverage_fraction": 0.08334649696581808,
+      "mxu_neither_coverage_fraction": 0.7245974726503714,
+      "sync_wait_overlap_us": 142.48202800000945
+    }
+  },
+  "xlu_opcode_coverage_mean_forward_us": {
+    "vadd.xlane.f32": 0.30733504146276874,
+    "vpop.xlane": 0.17595299988094362,
+    "vrot.lane": 0.6939532911998564,
+    "vpop.permute": 0.7501333744999101,
+    "vxpose": 1.0648413331294553,
+    "vset.pattern.permute": 0.0005469999996421393,
+    "vpop.trf": 0.28048287480517803,
+    "vperm": 0.05827824996064616
+  },
+  "warm_samples_us": [
+    26.401172,
+    26.385,
+    26.29,
+    26.303672,
+    26.299922,
+    26.399922,
+    26.217656,
+    26.381328,
+    26.388672,
+    26.293906,
+    26.193828,
+    26.5625,
+    26.2925,
+    26.397578,
+    26.298906,
+    26.391328,
+    26.3125,
+    26.311094,
+    26.3625,
+    26.399922,
+    26.268594,
+    26.377578,
+    26.3975,
+    26.4
+  ]
+}

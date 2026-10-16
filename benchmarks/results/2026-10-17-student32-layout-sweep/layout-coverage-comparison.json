@@ -1,0 +1,13 @@
+{
+  "before": {
+    "xlu_mean_covered_us": 3.235994581765074,
+    "warm_p50_us": 28.107695,
+    "vxpose_mean_covered_us": 1.1814542497742575
+  },
+  "after": {
+    "xlu_mean_covered_us": 3.059246665152841,
+    "warm_p50_us": 26.370039,
+    "vxpose_mean_covered_us": 1.0648413331294553
+  },
+  "note": "Separate detailed captures on same v6e-1/JAX/libtpu versions. Interpolated, overlapping instruction coverage is not exclusive saved latency."
+}

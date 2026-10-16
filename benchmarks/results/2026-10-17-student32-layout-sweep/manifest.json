@@ -1,0 +1,25 @@
+{
+  "workload": "student-32m BF16, seq128, batch1, 8 distinct inputs, all weights preloaded within each kernel invocation",
+  "protocol": "embed8/head6/unfused-QKV fixed. Four variants: baseline, only LHS transpose hint, only PV output kept transposed and consumed by Wo contracting axis0, both changes. All original BF16 boundaries retained. 10 profiled calls of nine forwards, exclude first forward per call: 80 samples. Bitwise validation against original embed1/head1 kernel before timing.",
+  "hardware": "v6e-1-ondemand-2, us-east5-a, one v6e chip",
+  "migration_reason": "Original v6e-4 reports UNHEALTHY_MAINTENANCE and SSH timed out; existing idle v6e-1 used, all groups rerun there. No service stopped.",
+  "versions": {
+    "jax": "0.11.2",
+    "jaxlib": "0.11.2",
+    "libtpu": "0.0.49",
+    "xprof-nightly": "2.24.2a20261002"
+  },
+  "remote_directory": "/home/junyi/student32-head-sweep-20261017",
+  "baseline_directory": "baseline: transpose_hint=false, pv_transposed=false",
+  "command_template": "PYTHONPATH=src TPU_VISIBLE_CHIPS=0 TPU_PROCESS_BOUNDS=1,1,1 TPU_CHIPS_PER_PROCESS_BOUNDS=1,1,1 LIBTPU_INIT_ARGS=\"--xla_enable_custom_call_region_trace=true\" /home/junyi/laya-tpu/.venv/bin/python -u student32_resident_profile.py checkpoint --out layout-results/<variant> --steps 10 --backends vmem --embed-group 8 --head-group 6 [--transpose-hint] [--pv-transposed]",
+  "source_sha256": {
+    "benchmarks/student32_vmem.py": "9e4f04212619dd7e9c55ff8d450b1cfae749b4b135414093f87125a1f2e25f8a",
+    "benchmarks/student32_resident_profile.py": "878d2a68fe05cd1015a59fa2343b23273d9a41f66bcf31ba42da24b342a21572",
+    "benchmarks/student32_optimization_summary.py": "80e5c25aacb0a15873aafc39755ac5a1d2dfadd8073a60ab89802ffc010281a9"
+  },
+  "failures": {
+    "hint": "Compile failed: INTERNAL RET_CHECK in mxu_lmr_transform.cc:126 current_xpose->GetTransposeWidth() == width (64 vs.128)"
+  },
+  "selection": "PV-transposed buffer without hint is fastest in this run; kept as --pv-transposed experimental option, defaults unchanged.",
+  "detailed_profile": "transposed-detailed: same selected variant, canonical xla_xprof_register_llo_debug_info and xla_xprof_enable_custom_call_tracing, three calls and 24 measured forwards."
+}

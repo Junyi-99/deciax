@@ -1,0 +1,20 @@
+{
+  "workload": "student-32m BF16, seq128, batch1, 8 distinct inputs, all weights preloaded within each kernel invocation",
+  "protocol": "head group6 fixed; embedding groups8,16,32,64,128. Each variant 3 warmup calls then 10 profiled calls of nine forwards, discarding first forward in each call. 80 measured samples. Compare all 9216 output elements from warmup plus eight different inputs bitwise with original embed1/head1 VMEM implementation before timing.",
+  "hardware": "v6e-1-ondemand-2, us-east5-a, one v6e chip",
+  "migration_reason": "Original v6e-4 reports UNHEALTHY_MAINTENANCE and SSH timed out; existing idle v6e-1 used, all groups rerun there. No service stopped.",
+  "versions": {
+    "jax": "0.11.2",
+    "jaxlib": "0.11.2",
+    "libtpu": "0.0.49",
+    "xprof-nightly": "2.24.2a20261002"
+  },
+  "remote_directory": "/home/junyi/student32-head-sweep-20261017",
+  "baseline_directory": "baseline is embed_group=8 with head_group=6",
+  "command_template": "PYTHONPATH=src TPU_VISIBLE_CHIPS=0 TPU_PROCESS_BOUNDS=1,1,1 TPU_CHIPS_PER_PROCESS_BOUNDS=1,1,1 LIBTPU_INIT_ARGS=\"--xla_enable_custom_call_region_trace=true\" /home/junyi/laya-tpu/.venv/bin/python -u student32_resident_profile.py checkpoint --out embedding-results/<variant> --steps 10 --backends vmem --embed-group <8-or-16-or-32-or-64-or-128> --head-group 6",
+  "source_sha256": {
+    "benchmarks/student32_vmem.py": "f66016fae1e572d1b5e88ac073cdb4a8fdaf0c76dfcacf8960a39177d8c65460",
+    "benchmarks/student32_resident_profile.py": "29b0f6b3e0e6dd10a26f673a5326372277632ae8362b0771392c6e61bbbe8c75",
+    "benchmarks/student32_optimization_summary.py": "80e5c25aacb0a15873aafc39755ac5a1d2dfadd8073a60ab89802ffc010281a9"
+  }
+}

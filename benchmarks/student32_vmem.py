@@ -56,8 +56,9 @@ def prepare(model, seq):
     return data
 
 
-def build(data, seq, repeats, vmem_mib, *, stream=False, embed_group=1, head_group=1):
-    assert embed_group in (1, 8) and head_group in (1, 2, 3, 6)
+def build(data, seq, repeats, vmem_mib, *, stream=False, embed_group=8, head_group=6, pv_transposed=True):
+    assert embed_group in (1, 8, 16, 32, 64, 128) and head_group in (1, 2, 3, 4, 6)
+    assert seq % embed_group == 0
     names = tuple(data)
 
     def kernel(meta, mask, *refs):
@@ -91,18 +92,18 @@ def build(data, seq, repeats, vmem_mib, *, stream=False, embed_group=1, head_gro
                 old = xbuf[pl.ds(i // 8 * 8, 8), :]
                 xbuf[pl.ds(i // 8 * 8, 8), :] = jnp.where(rows == i % 8, row, old)
 
-            # Gather eight independent tokens before one aligned output store.
+            # Gather independent tokens in a group before one aligned output store.
             def embed_block(group, unused):
                 selected = []
-                for lane in range(8):
-                    idx = meta[offset + group * 8 + lane]
+                for lane in range(embed_group):
+                    idx = meta[offset + group * embed_group + lane]
                     block = p["encoder.embeddings.tok_embeddings.weight"][pl.ds(idx // 8 * 8, 8), :].astype(jnp.float32)
                     rows = jax.lax.broadcasted_iota(jnp.int32, (8, 384), 0)
                     selected.append(jnp.sum(jnp.where(rows == idx % 8, block, 0.0), axis=0, keepdims=True))
-                xbuf[pl.ds(group * 8, 8), :] = jnp.concatenate(selected, axis=0)
+                xbuf[pl.ds(group * embed_group, embed_group), :] = jnp.concatenate(selected, axis=0)
 
-            if embed_group == 8:
-                jax.lax.fori_loop(0, seq // 8, embed_block, None)
+            if embed_group > 1:
+                jax.lax.fori_loop(0, seq // embed_group, embed_block, None)
             else:
                 jax.lax.fori_loop(0, seq, embed, None)
             xbuf[...] = norm(xbuf[...], "encoder.embeddings.norm")
@@ -132,15 +133,26 @@ def build(data, seq, repeats, vmem_mib, *, stream=False, embed_group=1, head_gro
                 # Expose independent softmax/QK work before consuming each PV.
                 for hg in range(0, 6, head_group):
                     probabilities = []
-                    for h in range(hg, hg + head_group):
+                    for h in range(hg, min(hg + head_group, 6)):
                         q, kk = (qkv[:, head_cols(h, j * 384)] for j in range(2))
                         st = scores_t(q, kk) + bias
                         prob = jnp.exp(st - st.max(0, keepdims=True))
                         probabilities.append(prob / prob.sum(0, keepdims=True))
-                    for h in range(hg, hg + head_group):
+                    for h in range(hg, min(hg + head_group, 6)):
                         v = qkv[:, head_cols(h, 2 * 384)]
-                        att[:, head_cols(h)] = pv_t(v, probabilities[h - hg]).T.astype(jnp.bfloat16)
-                x = x + linear(att[...], k + (".attn.Wo" if enc else ".self_attn.out_proj"))
+                        product = pv_t(v, probabilities[h - hg])
+                        if pv_transposed:
+                            att[head_cols(h), :] = product.astype(jnp.bfloat16)
+                        else:
+                            att[:, head_cols(h)] = product.T.astype(jnp.bfloat16)
+                output_key = k + (".attn.Wo" if enc else ".self_attn.out_proj")
+                if pv_transposed:
+                    projected_att = jax.lax.dot_general(att[...], val(output_key + ".weight"), (((0,), (0,)), ((), ())), preferred_element_type=jnp.float32)
+                    if output_key + ".bias" in p:
+                        projected_att += val(output_key + ".bias").astype(jnp.float32)
+                else:
+                    projected_att = linear(att[...], output_key)
+                x = x + projected_att
                 y = norm(x, k + (".mlp_norm" if enc else ".norm2"))
                 y = linear(y, k + (".mlp.Wi" if enc else ".linear1"))
                 if enc:
@@ -191,7 +203,7 @@ def build(data, seq, repeats, vmem_mib, *, stream=False, embed_group=1, head_gro
                 scratch_shapes=[
                     pltpu.VMEM((seq, 384), jnp.float32),
                     pltpu.VMEM((seq, 1152), jnp.bfloat16),
-                    pltpu.VMEM((seq, 384), jnp.bfloat16),
+                    pltpu.VMEM((384, seq) if pv_transposed else (seq, 384), jnp.bfloat16),
                     pltpu.VMEM((seq, 128), jnp.float32),
                 ],
             ),
@@ -208,8 +220,9 @@ def main():
     ap.add_argument("--repeats", type=int, default=1)
     ap.add_argument("--seq", type=int, default=128)
     ap.add_argument("--vmem-mib", type=int, default=80)
-    ap.add_argument("--embed-group", type=int, choices=(1, 8), default=1)
-    ap.add_argument("--head-group", type=int, choices=(1, 2, 3, 6), default=1)
+    ap.add_argument("--embed-group", type=int, choices=(1, 8, 16, 32, 64, 128), default=8)
+    ap.add_argument("--head-group", type=int, choices=(1, 2, 3, 4, 6), default=6)
+    ap.add_argument("--pv-transposed", action=argparse.BooleanOptionalAction, default=True)
     args = ap.parse_args()
     assert jax.default_backend() == "tpu" and len(jax.devices()) == 1
     print("device", jax.devices(), flush=True)
@@ -239,7 +252,15 @@ def main():
     seq = max(args.seq, max(x["input_ids"].shape[1] for x in encoded))
     data = prepare(model, seq)
     print("layouts prepared", flush=True)
-    fn = build(data, seq, args.repeats, args.vmem_mib, embed_group=args.embed_group, head_group=args.head_group)
+    fn = build(
+        data,
+        seq,
+        args.repeats,
+        args.vmem_mib,
+        embed_group=args.embed_group,
+        head_group=args.head_group,
+        pv_transposed=args.pv_transposed,
+    )
     results = []
     exe = None
     comparison_inputs = []
@@ -318,6 +339,7 @@ def main():
         "vmem_limit_mib": args.vmem_mib,
         "embed_group": args.embed_group,
         "head_group": args.head_group,
+        "pv_transposed": args.pv_transposed,
         "resident_input_bytes": sum(x.size * x.dtype.itemsize for x in data.values()),
         "timing": timing,
         "protocol": "Compiled calls, synchronized host timing, 8 inputs x 10 measured cycles after 2 warmup cycles, rotating backend order; tokenization excluded. Full VMEM includes weight load per call.",

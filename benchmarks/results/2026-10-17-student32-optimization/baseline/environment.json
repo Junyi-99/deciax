@@ -1,0 +1,15 @@
+{
+  "versions": {
+    "xprof-nightly": "2.24.2a20261014",
+    "jax": "0.11.2",
+    "jaxlib": "0.11.2",
+    "libtpu": "0.0.48"
+  },
+  "LIBTPU_INIT_ARGS": "--xla_enable_custom_call_region_trace=true --xla_tpu_use_enhanced_launch_barrier=true",
+  "modes": [
+    "TRACE_COMPUTE_AND_SYNC"
+  ],
+  "steps": 10,
+  "embed_group": 1,
+  "head_group": 1
+}

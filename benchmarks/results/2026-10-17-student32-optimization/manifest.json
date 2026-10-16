@@ -1,0 +1,54 @@
+{
+  "workload": "student32 BF16, one v6e chip, batch 1, seq128, all weights resident within a call; nine forwards per call, first discarded, eight different inputs measured",
+  "variants": {
+    "baseline": [
+      1,
+      1
+    ],
+    "embed8": [
+      8,
+      1
+    ],
+    "head2": [
+      1,
+      2
+    ],
+    "embed8-head2": [
+      8,
+      2
+    ],
+    "combined-detailed": [
+      8,
+      2
+    ]
+  },
+  "variant_fields": [
+    "embed_group",
+    "head_group"
+  ],
+  "timing": "First four variants: 10 calls, 80 measured forwards each, region tracing. Last variant: fresh process, canonical detailed custom-call tracing, 3 calls and 24 measured forwards. Preload and warmup excluded.",
+  "correctness": "Before timing, compare every output element (9 x 8 x 128 = 9216) bitwise with original VMEM implementation, including action outputs; all variants pass. Existing JAX softmax error threshold 0.02 also checked; this is eight-input smoke validation, not task accuracy evaluation.",
+  "implementation": "Grouped embedding collects eight independent gathered rows then performs one aligned store. Grouped heads expose two QK/softmax paths before consuming their PVs; precision unchanged. Original defaults preserved for reproducible baseline.",
+  "remote_directory": "/home/junyi/work-dir/deciax-student32-vmem-20261016",
+  "python": "/home/junyi/work-dir/deciax-pallas-20261015/profile/.venv/bin/python",
+  "command_template": "PYTHONPATH=src TPU_VISIBLE_CHIPS=0 TPU_PROCESS_BOUNDS=1,1,1 TPU_CHIPS_PER_PROCESS_BOUNDS=1,1,1 LIBTPU_INIT_ARGS=\"--xla_enable_custom_call_region_trace=true\" <python> student32_resident_profile.py checkpoint --out optimization-20261017/<variant> --steps 10 --backends vmem --embed-group <1-or-8> --head-group <1-or-2>",
+  "source_sha256": {
+    "benchmarks/student32_vmem.py": "198c8274400beaf818aecb166e7c68684e32a91f019437c0bdcab13a6e239cc6",
+    "benchmarks/student32_resident_profile.py": "091d73b53ecff2b617e2f5e16033aec115ca471ac86c5ebee2643698c81d1758",
+    "benchmarks/student32_optimization_summary.py": "80e5c25aacb0a15873aafc39755ac5a1d2dfadd8073a60ab89802ffc010281a9"
+  },
+  "service_restored": {
+    "pid": 1222688,
+    "health": "ok",
+    "loaded": [
+      "clef"
+    ],
+    "port": 8000
+  },
+  "checks": [
+    "Python compilation passed for three benchmark scripts",
+    "git diff --check passed",
+    "all four variants and detailed profile passed bitwise output equality against original VMEM implementation"
+  ],
+  "detailed_profile_note": "Canonical detailed trace confirms 32.717539 us median vs 32.555 us in lighter region trace. Changed compiler schedule means first MXU timestamp is not a standalone embedding latency; instruction-union coverage cannot establish improved hardware utilization."
+}

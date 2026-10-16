@@ -37,21 +37,15 @@ The combined change reduced this microbenchmark latency by 2.28%. This compariso
 
 Compiled TP4 evidence selected `UniDirection1DRingStrategy`/`RotatedPincerEmitter` for psum and `SingleInputAllReduceScatterFusion`/`StrategySubgroupND` for explicit RS. The latter padded 2048 rows to 2112, produced 528 rows per chip, and used a 48-row neighbor collective-permute to reconstruct 512-row shards before BF16 all-gather. The actual all-gather shard was 5 MiB. These formatting costs are included in the measured total. FP32 operands/reducers and a BF16 all-reduce result alone do not establish the internal wire dtype.
 
-Raw samples: [TP collective measurements](../benchmarks/results/2026-10-16-tp-collectives.json). The earlier diagnostic sweep measured 1.71%; neither sweep used interleaved repetition.
+The earlier diagnostic sweep measured 1.71%; neither sweep used interleaved repetition.
 
 ## Validation
 
 CPU suite: 107 passed, 45 skipped; simulated TP1/2/4 collective tests: 12 passed, including uneven row counts and every replicated output shard. TPU fusion/collective tests: 23 passed. Type checking and relevant pre-commit hooks passed.
 
-The full Clef checkpoint passed B1/2/4/8 at S512 against saved JAX outputs: all predicted choices matched, maximum probability error 0.003049. Forward medians were 67.27/129.30/247.54/494.02 ms respectively; these correctness-run timings do not establish an end-to-end speedup. [Checkpoint measurements](../benchmarks/results/2026-10-16-tp-checkpoint.json) include matching source hashes for all 49 source files.
+The full Clef checkpoint passed B1/2/4/8 at S512 against saved JAX outputs: all predicted choices matched, maximum probability error 0.003049. Forward medians were 67.27/129.30/247.54/494.02 ms respectively; these correctness-run timings do not establish an end-to-end speedup. The checkpoint run recorded matching source hashes for all 49 source files.
 
 ## Reproduction
-
-Clef TP4 synthetic Pallas MLP, original mesh/psum baseline and topology/RS→AG variants (requires four local TPU devices):
-
-```sh
-PYTHONPATH=src python benchmarks/tp_collectives.py --out /tmp/clef-tp.json
-```
 
 Collective correctness on one, two and four simulated CPU devices, including uneven row counts:
 

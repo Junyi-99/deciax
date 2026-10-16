@@ -61,7 +61,7 @@ def pack_layer(params: dict[str, jax.Array], mesh: Mesh, tiling: MlpTiling) -> d
 
 def mlp(x: jax.Array, p: Mapping[str, jax.Array], *, eps: float, mesh: Mesh, tiling: MlpTiling) -> jax.Array:
     def local(x: jax.Array, n: jax.Array, gu: jax.Array, down: jax.Array) -> jax.Array:
-        if tiling.communication_overlap:
+        if tiling.communication_overlap and mesh.size > 1:
             return mlp_reduce_scatter_all_gather(x.reshape(-1, x.shape[-1]), n, gu, down, eps=eps, rows=tiling.rows).reshape(x.shape)
         partial = fused_mlp_partial(x.reshape(-1, x.shape[-1]), n, gu, down, eps=eps, tiling=tiling)
         # Preserve dense() semantics: sum all TP shards in FP32, then cast,

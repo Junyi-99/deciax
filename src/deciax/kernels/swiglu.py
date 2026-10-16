@@ -39,7 +39,7 @@ class MlpTiling:
             raise ValueError("MLP supports one or two input buffers")
 
 
-DEFAULT_TILING = MlpTiling()
+DEFAULT_TILING = MlpTiling(communication_overlap=True)
 
 
 def pack(gate: jax.Array, up: jax.Array, down: jax.Array, tile: int) -> tuple[jax.Array, jax.Array]:

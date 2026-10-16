@@ -12,6 +12,7 @@ import jax.numpy as jnp
 from jax.sharding import Mesh
 from jax.sharding import PartitionSpec as P
 
+from deciax.kernels.mlp_collective import mlp_reduce_scatter_all_gather
 from deciax.kernels.projection import norm_project
 from deciax.kernels.swiglu import MlpTiling, fused_mlp_partial, pack
 from deciax.models.clef.weights import spec
@@ -60,6 +61,8 @@ def pack_layer(params: dict[str, jax.Array], mesh: Mesh, tiling: MlpTiling) -> d
 
 def mlp(x: jax.Array, p: Mapping[str, jax.Array], *, eps: float, mesh: Mesh, tiling: MlpTiling) -> jax.Array:
     def local(x: jax.Array, n: jax.Array, gu: jax.Array, down: jax.Array) -> jax.Array:
+        if tiling.communication_overlap and mesh.size > 1:
+            return mlp_reduce_scatter_all_gather(x.reshape(-1, x.shape[-1]), n, gu, down, eps=eps, rows=tiling.rows).reshape(x.shape)
         partial = fused_mlp_partial(x.reshape(-1, x.shape[-1]), n, gu, down, eps=eps, tiling=tiling)
         # Preserve dense() semantics: sum all TP shards in FP32, then cast,
         # then add the BF16 residual. Never round each shard independently.

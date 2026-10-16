@@ -24,8 +24,11 @@ class MlpTiling:
     vmem_limit_bytes: int = 127 * 1024 * 1024
     output_buffers: int = 1
     input_buffers: int = 1
+    communication_overlap: bool = False
 
     def __post_init__(self) -> None:
+        if self.communication_overlap and self.rows not in (256, 512):
+            raise ValueError("communication overlap requires the default schedule and M256/512")
         if self.rows <= 0 or self.rows % 256 or self.intermediate <= 0 or self.intermediate % 256:
             raise ValueError("MLP row and intermediate tiles must be positive multiples of 256")
         if self.buffers not in (1, 2):
@@ -36,7 +39,7 @@ class MlpTiling:
             raise ValueError("MLP supports one or two input buffers")
 
 
-DEFAULT_TILING = MlpTiling()
+DEFAULT_TILING = MlpTiling(communication_overlap=True)
 
 
 def pack(gate: jax.Array, up: jax.Array, down: jax.Array, tile: int) -> tuple[jax.Array, jax.Array]:
@@ -48,33 +51,11 @@ def pack(gate: jax.Array, up: jax.Array, down: jax.Array, tile: int) -> tuple[ja
     return jnp.concatenate((gate, up), axis=-1), down
 
 
-def fused_mlp_partial(
-    x: jax.Array,
-    norm: jax.Array,
-    gate_up: jax.Array,
-    down: jax.Array,
-    *,
-    eps: float,
-    tiling: MlpTiling = DEFAULT_TILING,
-    interpret: bool = False,
-) -> jax.Array:
-    """[rows,D] BF16 -> FP32 local down sum, before TP psum and rounding.
-
-    Inputs/outputs use [rows,channels] tiles: both trailing axes align to the
-    VReg (8,128) geometry. BF16 rounding follows Qwen3.5's RMSNorm/SwiGLU.
-    """
-    rows, d = x.shape
-    m, f, nt = min(tiling.rows, (rows + 255) // 256 * 256), tiling.intermediate, gate_up.shape[0]
-    if d % 256 or gate_up.shape != (nt, d, 2 * f) or down.shape != (nt, f, d):
-        raise ValueError("invalid packed MLP shape or hidden size not divisible by 256")
-    if any(a.dtype != jnp.bfloat16 for a in (x, norm, gate_up, down)):
-        raise ValueError("fused Clef MLP requires BF16 inputs and weights")
-    x = jnp.pad(x, ((0, -rows % m), (0, 0)))
+def make_mlp_tile(m: int, d: int, f: int, nt: int, eps: float, buffers: int, interpret: bool = False) -> Any:
     bm, bn, bk = (gcd(v, 512) for v in (m, d, d))
     bf = 256
     down_group = gcd(d, 1024)
     groups = d // down_group
-    buffers = tiling.buffers
 
     def kernel(xr: Any, nr: Any, gur: Any, dr: Any, yr: Any, hr: Any, ar: Any) -> None:
         def normalize(i: jax.Array, _: None) -> None:
@@ -178,6 +159,33 @@ def fused_mlp_partial(
             jax.lax.fori_loop(0, groups, group, None)
 
         pl.run_scoped(down_stage, pltpu.VMEM((buffers, nt, f, down_group), jnp.bfloat16), pltpu.SemaphoreType.DMA((buffers,)))
+
+    return kernel
+
+
+def fused_mlp_partial(
+    x: jax.Array,
+    norm: jax.Array,
+    gate_up: jax.Array,
+    down: jax.Array,
+    *,
+    eps: float,
+    tiling: MlpTiling = DEFAULT_TILING,
+    interpret: bool = False,
+) -> jax.Array:
+    """[rows,D] BF16 -> FP32 local down sum, before TP psum and rounding.
+
+    Inputs/outputs use [rows,channels] tiles: both trailing axes align to the
+    VReg (8,128) geometry. BF16 rounding follows Qwen3.5's RMSNorm/SwiGLU.
+    """
+    rows, d = x.shape
+    m, f, nt = min(tiling.rows, (rows + 255) // 256 * 256), tiling.intermediate, gate_up.shape[0]
+    if d % 256 or gate_up.shape != (nt, d, 2 * f) or down.shape != (nt, f, d):
+        raise ValueError("invalid packed MLP shape or hidden size not divisible by 256")
+    if any(a.dtype != jnp.bfloat16 for a in (x, norm, gate_up, down)):
+        raise ValueError("fused Clef MLP requires BF16 inputs and weights")
+    x = jnp.pad(x, ((0, -rows % m), (0, 0)))
+    kernel = make_mlp_tile(m, d, f, nt, eps, tiling.buffers, interpret)
 
     result = pl.pallas_call(
         kernel,

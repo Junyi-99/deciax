@@ -40,7 +40,7 @@ class ClefModel:
         impl: ImplChoice = "auto",
         mlp_tiling: MlpTiling = DEFAULT_TILING,
         fuse_projections: bool = True,
-        projection_rows: int = 512,
+        projection_rows: int | None = None,
     ) -> None:
         self.name = name
         if impl not in ("auto", "jax", "pallas"):
@@ -73,6 +73,8 @@ class ClefModel:
                 self.layers[i] = pallas.pack_layer(self.layers[i], mesh, mlp_tiling)
                 if fuse_projections:
                     self.layers[i] = pallas.pack_projections(self.layers[i], mesh)
+            if projection_rows is None:
+                projection_rows = 256 if mesh.size == 2 else 512
             layer_fn = functools.partial(pallas.layer, mesh=mesh, tiling=mlp_tiling, projection_rows=projection_rows)
         self._layer = jax.jit(layer_fn, static_argnames=("config", "linear_attention"), out_shardings=self.replicated)
         cfg = json.loads((path / "joint_head_config.json").read_text())

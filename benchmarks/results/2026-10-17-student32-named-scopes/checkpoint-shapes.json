@@ -1,0 +1,745 @@
+{
+  "encoder_config": {
+    "architectures": [
+      "ModernBertForMaskedLM"
+    ],
+    "attention_bias": false,
+    "attention_dropout": 0.0,
+    "bos_token_id": 50281,
+    "causal_mask": false,
+    "classifier_activation": "gelu",
+    "classifier_bias": false,
+    "classifier_dropout": 0.0,
+    "classifier_pooling": "mean",
+    "cls_token_id": 50281,
+    "decoder_bias": true,
+    "deterministic_flash_attn": false,
+    "dtype": "float32",
+    "embedding_dropout": 0.0,
+    "eos_token_id": 50282,
+    "global_attn_every_n_layers": 3,
+    "gradient_checkpointing": false,
+    "hidden_activation": "gelu",
+    "hidden_size": 384,
+    "initializer_cutoff_factor": 2.0,
+    "initializer_range": 0.02,
+    "intermediate_size": 576,
+    "is_causal": false,
+    "layer_norm_eps": 1e-05,
+    "layer_types": [
+      "full_attention",
+      "sliding_attention",
+      "sliding_attention",
+      "full_attention",
+      "sliding_attention",
+      "sliding_attention",
+      "full_attention",
+      "sliding_attention",
+      "sliding_attention",
+      "full_attention"
+    ],
+    "local_attention": 128,
+    "max_position_embeddings": 7999,
+    "mlp_bias": false,
+    "mlp_dropout": 0.0,
+    "model_type": "modernbert",
+    "norm_bias": false,
+    "norm_eps": 1e-05,
+    "num_attention_heads": 6,
+    "num_hidden_layers": 10,
+    "pad_token_id": 50283,
+    "position_embedding_type": "sans_pos",
+    "rope_parameters": {
+      "full_attention": {
+        "rope_theta": 160000.0,
+        "rope_type": "default"
+      },
+      "sliding_attention": {
+        "rope_theta": 160000.0,
+        "rope_type": "default"
+      }
+    },
+    "sep_token_id": 50282,
+    "sparse_pred_ignore_index": -100,
+    "sparse_prediction": false,
+    "tie_word_embeddings": true,
+    "transformers_version": "5.17.0",
+    "vocab_size": 50368
+  },
+  "agent_config": {
+    "encoder": "models/ettin-encoder-32m",
+    "head_layers": 2,
+    "max_len": 1024,
+    "head_max_len": 256,
+    "max_prefixes": 6,
+    "act_costs": {
+      "escalate": 0.5
+    },
+    "cost_wrong_act": 3.0,
+    "amp_dtype": "bf16",
+    "model_name": "ckpt-32m-fp",
+    "temperature": [
+      1.0871,
+      1.2543,
+      1.0365
+    ],
+    "temperature_by_options": {
+      "choice:11+": 1.0365,
+      "choice:3-5": 1.0871,
+      "noul:2": 1.0365,
+      "score:3-5": 1.2543
+    },
+    "training": {
+      "recipe": "RLCD (Laya) + 0.3 teacher distillation",
+      "epochs": 3,
+      "qat_int8": false,
+      "items": 94971,
+      "encoder": "models/ettin-encoder-32m"
+    }
+  },
+  "weights": {
+    "act_head.0.bias": {
+      "shape": [
+        256
+      ],
+      "dtype": "BF16"
+    },
+    "act_head.0.weight": {
+      "shape": [
+        256,
+        388
+      ],
+      "dtype": "BF16"
+    },
+    "act_head.2.bias": {
+      "shape": [
+        2
+      ],
+      "dtype": "BF16"
+    },
+    "act_head.2.weight": {
+      "shape": [
+        2,
+        256
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.embeddings.norm.weight": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.embeddings.tok_embeddings.weight": {
+      "shape": [
+        50368,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.final_norm.weight": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.0.attn.Wo.weight": {
+      "shape": [
+        384,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.0.attn.Wqkv.weight": {
+      "shape": [
+        1152,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.0.mlp.Wi.weight": {
+      "shape": [
+        1152,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.0.mlp.Wo.weight": {
+      "shape": [
+        384,
+        576
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.0.mlp_norm.weight": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.1.attn.Wo.weight": {
+      "shape": [
+        384,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.1.attn.Wqkv.weight": {
+      "shape": [
+        1152,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.1.attn_norm.weight": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.1.mlp.Wi.weight": {
+      "shape": [
+        1152,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.1.mlp.Wo.weight": {
+      "shape": [
+        384,
+        576
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.1.mlp_norm.weight": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.2.attn.Wo.weight": {
+      "shape": [
+        384,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.2.attn.Wqkv.weight": {
+      "shape": [
+        1152,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.2.attn_norm.weight": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.2.mlp.Wi.weight": {
+      "shape": [
+        1152,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.2.mlp.Wo.weight": {
+      "shape": [
+        384,
+        576
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.2.mlp_norm.weight": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.3.attn.Wo.weight": {
+      "shape": [
+        384,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.3.attn.Wqkv.weight": {
+      "shape": [
+        1152,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.3.attn_norm.weight": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.3.mlp.Wi.weight": {
+      "shape": [
+        1152,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.3.mlp.Wo.weight": {
+      "shape": [
+        384,
+        576
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.3.mlp_norm.weight": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.4.attn.Wo.weight": {
+      "shape": [
+        384,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.4.attn.Wqkv.weight": {
+      "shape": [
+        1152,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.4.attn_norm.weight": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.4.mlp.Wi.weight": {
+      "shape": [
+        1152,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.4.mlp.Wo.weight": {
+      "shape": [
+        384,
+        576
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.4.mlp_norm.weight": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.5.attn.Wo.weight": {
+      "shape": [
+        384,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.5.attn.Wqkv.weight": {
+      "shape": [
+        1152,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.5.attn_norm.weight": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.5.mlp.Wi.weight": {
+      "shape": [
+        1152,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.5.mlp.Wo.weight": {
+      "shape": [
+        384,
+        576
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.5.mlp_norm.weight": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.6.attn.Wo.weight": {
+      "shape": [
+        384,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.6.attn.Wqkv.weight": {
+      "shape": [
+        1152,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.6.attn_norm.weight": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.6.mlp.Wi.weight": {
+      "shape": [
+        1152,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.6.mlp.Wo.weight": {
+      "shape": [
+        384,
+        576
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.6.mlp_norm.weight": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.7.attn.Wo.weight": {
+      "shape": [
+        384,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.7.attn.Wqkv.weight": {
+      "shape": [
+        1152,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.7.attn_norm.weight": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.7.mlp.Wi.weight": {
+      "shape": [
+        1152,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.7.mlp.Wo.weight": {
+      "shape": [
+        384,
+        576
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.7.mlp_norm.weight": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.8.attn.Wo.weight": {
+      "shape": [
+        384,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.8.attn.Wqkv.weight": {
+      "shape": [
+        1152,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.8.attn_norm.weight": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.8.mlp.Wi.weight": {
+      "shape": [
+        1152,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.8.mlp.Wo.weight": {
+      "shape": [
+        384,
+        576
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.8.mlp_norm.weight": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.9.attn.Wo.weight": {
+      "shape": [
+        384,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.9.attn.Wqkv.weight": {
+      "shape": [
+        1152,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.9.attn_norm.weight": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.9.mlp.Wi.weight": {
+      "shape": [
+        1152,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.9.mlp.Wo.weight": {
+      "shape": [
+        384,
+        576
+      ],
+      "dtype": "BF16"
+    },
+    "encoder.layers.9.mlp_norm.weight": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "head.layers.0.linear1.bias": {
+      "shape": [
+        1536
+      ],
+      "dtype": "BF16"
+    },
+    "head.layers.0.linear1.weight": {
+      "shape": [
+        1536,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "head.layers.0.linear2.bias": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "head.layers.0.linear2.weight": {
+      "shape": [
+        384,
+        1536
+      ],
+      "dtype": "BF16"
+    },
+    "head.layers.0.norm1.bias": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "head.layers.0.norm1.weight": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "head.layers.0.norm2.bias": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "head.layers.0.norm2.weight": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "head.layers.0.self_attn.in_proj_bias": {
+      "shape": [
+        1152
+      ],
+      "dtype": "BF16"
+    },
+    "head.layers.0.self_attn.in_proj_weight": {
+      "shape": [
+        1152,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "head.layers.0.self_attn.out_proj.bias": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "head.layers.0.self_attn.out_proj.weight": {
+      "shape": [
+        384,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "head.layers.1.linear1.bias": {
+      "shape": [
+        1536
+      ],
+      "dtype": "BF16"
+    },
+    "head.layers.1.linear1.weight": {
+      "shape": [
+        1536,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "head.layers.1.linear2.bias": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "head.layers.1.linear2.weight": {
+      "shape": [
+        384,
+        1536
+      ],
+      "dtype": "BF16"
+    },
+    "head.layers.1.norm1.bias": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "head.layers.1.norm1.weight": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "head.layers.1.norm2.bias": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "head.layers.1.norm2.weight": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "head.layers.1.self_attn.in_proj_bias": {
+      "shape": [
+        1152
+      ],
+      "dtype": "BF16"
+    },
+    "head.layers.1.self_attn.in_proj_weight": {
+      "shape": [
+        1152,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "head.layers.1.self_attn.out_proj.bias": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "head.layers.1.self_attn.out_proj.weight": {
+      "shape": [
+        384,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "scorer.0.bias": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "scorer.0.weight": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "scorer.1.bias": {
+      "shape": [
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "scorer.1.weight": {
+      "shape": [
+        384,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "scorer.3.bias": {
+      "shape": [
+        1
+      ],
+      "dtype": "BF16"
+    },
+    "scorer.3.weight": {
+      "shape": [
+        1,
+        384
+      ],
+      "dtype": "BF16"
+    },
+    "temperature": {
+      "shape": [
+        3
+      ],
+      "dtype": "BF16"
+    },
+    "type_emb.weight": {
+      "shape": [
+        3,
+        384
+      ],
+      "dtype": "BF16"
+    }
+  },
+  "header_sha256": "8e7a365206fe8f687e7bd84c9ba1bd9e0959833767cb6297ac9ec417edab0312"
+}

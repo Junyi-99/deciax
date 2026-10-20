@@ -1,0 +1,5 @@
+{
+  "uninstrumented_bitwise_equal": true,
+  "outputs_compared": 9216,
+  "reference_kernel": "student32_uninstrumented.py"
+}

@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Student32 · 从模型到 TPU 指令</title>
+<style>
+:root{color-scheme:light;--ink:#182324;--muted:#5b6868;--line:#d9e2df;--accent:#116b56;--paper:#fff;--bg:#f4f7f5;--blue:#265d99;--axis:#8a5a1f}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 system-ui,-apple-system,"PingFang SC",sans-serif}main{max-width:1180px;margin:auto;padding:50px 32px 70px}h1{font-size:38px;letter-spacing:-1.4px;line-height:1.2;margin:12px 0 20px;font-weight:650}h2{font-size:24px;letter-spacing:-.5px;margin:0 0 15px}h3{font-size:17px;margin:20px 0 10px}p{max-width:920px}a{color:var(--accent)}code,.shape{font:13px/1.6 ui-monospace,SFMono-Regular,monospace}code{overflow-wrap:anywhere}.shape b{font-weight:600;color:var(--ink)}.shape i{font-style:normal;color:var(--axis);font-size:11px;margin-left:1px}.eyebrow{font-size:12px;text-transform:uppercase;letter-spacing:2px;color:var(--accent)}.lead{font-size:18px;color:var(--muted);max-width:900px}.meta{display:flex;gap:28px;flex-wrap:wrap;border-block:1px solid var(--line);padding:20px 0;margin:28px 0}.meta strong{font-size:23px;display:block}.meta span{color:var(--muted);font-size:12px}nav{display:flex;gap:24px;flex-wrap:wrap;margin-bottom:36px}nav a{text-decoration:none}section{padding:32px 0;border-top:1px solid var(--line)}.note{border-left:3px solid var(--accent);padding:10px 18px;background:#eaf2ee;color:#334f45;max-width:920px}.flow{display:flex;align-items:stretch;gap:9px;flex-wrap:wrap;margin:24px 0}.flow .node{flex:1;min-width:150px;border:1px solid var(--line);padding:17px 13px;background:var(--paper)}.flow .node strong{display:block;margin-bottom:7px}.flow .node small{display:block;color:var(--muted);margin-top:6px}.arrow{align-self:center;color:var(--muted)}.split{display:grid;grid-template-columns:1fr 1fr;gap:26px}.lane{border-top:2px solid var(--accent);padding-top:12px}.muted{color:var(--muted)}.layer-buttons{display:flex;flex-wrap:wrap;gap:7px;margin:20px 0}button,.button{font:inherit;cursor:pointer;border:1px solid var(--line);padding:9px 14px;background:white;color:var(--ink);border-radius:5px;text-decoration:none;display:inline-block}button:hover,.button:hover{border-color:var(--accent)}button[aria-pressed=true],.primary{color:white;background:var(--accent);border-color:var(--accent)}button:focus-visible,a:focus-visible{outline:3px solid #9dc9bd;outline-offset:3px}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:14px}th{text-align:left;color:var(--muted);font-size:12px;letter-spacing:.5px;background:#edf2ef}td,th{padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top}td:first-child{min-width:150px}td code{display:block;margin-top:4px;color:var(--muted);font-size:11px}.shape{white-space:pre-line;min-width:260px}.calc{min-width:220px}.unit{color:var(--accent);font-size:13px;min-width:120px}.t{white-space:nowrap;font:12px ui-monospace,monospace;color:var(--muted)}.readout{display:flex;justify-content:space-between;align-items:start;gap:20px;margin:20px 0}.readout p{margin:0}.metric{white-space:nowrap;font-size:22px;color:var(--accent)}.metric small{display:block;font-size:11px;color:var(--muted)}.bars{display:grid;gap:13px;margin:20px 0;max-width:760px}.bar-row{display:grid;grid-template-columns:155px 1fr 65px;gap:16px;align-items:center;font-size:12px}.bar{height:12px;background:#e5ece8}.bar i{height:100%;display:block;background:var(--accent)}details{border-bottom:1px solid var(--line);padding:14px 0}summary{cursor:pointer;font-weight:600}.status{min-height:26px;color:var(--accent)}footer{margin-top:30px;color:var(--muted);font-size:12px}.trace-box{padding:25px;background:white;border:1px solid var(--line)}.trace-box ol{padding-left:20px}.small{font-size:12px}#layer-description{max-width:760px}.axis td:first-child{font:600 13px ui-monospace,monospace;color:var(--axis);min-width:110px}.axis td:nth-child(2){font:13px ui-monospace,monospace;white-space:nowrap}ol.steps{padding-left:22px;max-width:920px}ol.steps li{padding:4px 0}.diagram{overflow-x:auto;margin:20px 0;background:var(--paper);border:1px solid var(--line);padding:14px 10px}.diagram svg{display:block;width:1040px;max-width:100%;height:auto;font-family:system-ui,-apple-system,"PingFang SC",sans-serif}.diagram .op{font-size:13px;fill:var(--ink)}.diagram .scope{font:11px ui-monospace,SFMono-Regular,monospace;fill:var(--muted)}.diagram .lab{font:12px ui-monospace,SFMono-Regular,monospace;fill:var(--ink)}.diagram .lab .n,.diagram .op .n{font-weight:600}.diagram .ax{fill:var(--axis);font-size:10px}.diagram rect.b{fill:#fff;stroke:var(--line)}.diagram rect.mem{fill:#eaf2ee;stroke:var(--accent)}.diagram rect.side{fill:#f4f7f5;stroke:var(--muted);stroke-dasharray:3 3}.diagram .e{stroke:var(--muted);stroke-width:1.3;fill:none}.diagram .res{stroke:var(--accent);stroke-width:1.4;fill:none;stroke-dasharray:5 4}.diagram .dot{fill:var(--accent)}.diagram circle.sum{fill:#fff;stroke:var(--accent);stroke-width:1.5}.diagram rect.grp{fill:#fafcfb;stroke:#b9cdc5;stroke-dasharray:4 4}.diagram .gl{font-size:12px;fill:var(--accent);font-weight:600}.diagram .cell{fill:#fff;stroke:var(--line)}.codes{display:grid;grid-template-columns:1fr;gap:18px;margin:16px 0}.code{background:#fff;border:1px solid var(--line);padding:14px 16px;overflow-x:auto}.code h4{margin:0 0 10px;font:600 13px system-ui,-apple-system,"PingFang SC",sans-serif}.code h4 small{font-weight:400;color:var(--muted);margin-left:8px}.code .lines{white-space:pre;font:12.5px/1.8 ui-monospace,SFMono-Regular,monospace;display:grid;grid-template-columns:max-content minmax(0,1fr);column-gap:26px}.code .cm{color:var(--muted)}.code .cm .sc{color:var(--blue)}.code .cm b{color:var(--ink);font-weight:600}.code .cm i{font-style:normal;color:var(--axis);font-size:10.5px}@media(max-width:700px){main{padding:28px 18px}h1{font-size:29px}.split{grid-template-columns:1fr}.meta{gap:18px}.meta strong{font-size:20px}.flow{display:grid;grid-template-columns:1fr}.arrow{justify-self:center;transform:rotate(90deg)}.readout{display:block}.metric{margin-top:10px}.bar-row{grid-template-columns:130px 1fr 45px;gap:8px}td,th{padding:9px}.shape{min-width:210px}}
+</style></head><body><main>
+<header><div class="eyebrow">Laya / Ettin encoder-32m / TPU v6e</div><h1>Student32：从模型流程到执行单元</h1><p class="lead">一次前向经过 embedding、10 层 ModernBERT encoder、2 层决策 Transformer 和两个输出头。本页按 trace 里的 named scope 逐步列出每一步的输入输出 shape、每个轴的含义、做的计算和用到的 TPU 执行单元。</p><div class="meta"><div><strong>35.68M</strong><span>参数量</span></div><div><strong>1 × 128</strong><span>batch × seq</span></div><div><strong>384 = 6 × 64</strong><span>hidden = head × dim</span></div><div><strong>BF16 → FP32</strong><span>矩阵输入 / 累加与残差</span></div></div>
+<nav><a href="#axes">轴词典</a><a href="#model">前向流程</a><a href="#layers">逐层展开</a><a href="#heads">输出头</a><a href="#units">执行单元</a><a href="#evidence">本次采集</a><a href="#perfetto">打开 trace ↗</a></nav></header>
+
+<section id="axes"><h2>00 / 轴词典</h2><p>全文 shape 写作 <span class="shape">[<b>128</b><i>seq</i>, <b>384</b><i>hidden</i>]</span>：数字是长度，后面的词是这条轴的含义。batch 恒为 1，全部省略。</p>
+<div class="table-wrap"><table class="axis"><thead><tr><th>轴</th><th>长度</th><th>含义</th></tr></thead><tbody>
+<tr><td>seq</td><td>128</td><td>序列位置轴，长度是 pad 后的 token 个数。每个位置上是一个 token 的 384 维向量；mask 标出哪些位置是真实 token。和 lane 的 128 无关。</td></tr>
+<tr><td>query / key</td><td>128 / 128</td><td>attention 里 seq 轴的两个角色：query 是正在计算输出的位置，key 是被查看的位置。本 kernel 的 score 矩阵是 [key, query]，softmax 沿 key。</td></tr>
+<tr><td>hidden</td><td>384</td><td>模型隐藏宽度。LayerNorm 沿这条轴求均值和方差。</td></tr>
+<tr><td>head / dim</td><td>6 / 64</td><td>6 个 attention head，每个 64 维；head×dim = 384。在 qkv 和 att 中 6 个 head 沿 lane 并排：head h 占 lane h·64 … h·64+63。</td></tr>
+<tr><td>qkv</td><td>1152</td><td>Q、K、V 三段各 384 并排：lane 0–383 是 Q，384–767 是 K，768–1151 是 V；每段内部再按 head×dim 排。</td></tr>
+<tr><td>ffn</td><td>640 / 1536</td><td>FFN 中间宽度。encoder 为 gated GELU，每支逻辑宽 576，补零到 640，两支并排为 1280。decision 层为 ReLU，宽 1536。</td></tr>
+<tr><td>vocab</td><td>50368</td><td>词表行数。embedding 表每行一个 token 的 384 维向量。</td></tr>
+<tr><td>lane</td><td>128</td><td>TPU 向量寄存器的列宽，和 seq 的 128 只是数值相同。逻辑上不足 128 的最后一维补到 128：scorer 的 1 列、feature 的 4 列、action 的 2 列。</td></tr>
+<tr><td>sublane</td><td>8</td><td>TPU 向量寄存器的行数。按 8 行对齐读写：embedding 取块、marker 取块、输出打包。</td></tr>
+<tr><td>repetition</td><td>9</td><td>kernel 内第几次 forward。第 0 次是 warmup，1–8 是 8 组不同输入。</td></tr>
+<tr><td>type / option</td><td>3 / 2</td><td>question type 数；本次每个问题的选项数。</td></tr>
+</tbody></table></div></section>
+
+<section id="model"><h2>01 / 一次前向</h2><p>模型 <code>ckpt-32m-fp</code>，encoder 为 <code>models/ettin-encoder-32m</code>。整个模型是一个 Pallas kernel，所有权重在 kernel 开始时从 HBM 搬进 VMEM，9 次 forward 复用。tokenization 和最终校准解码在 CPU 侧，不在 kernel 内。</p>
+<div class="flow"><div class="node"><strong>Embedding</strong><span class="shape" data-s="表 [50368·vocab, 384·hidden]
+→ xbuf [128·seq, 384·hidden]"></span><small>按 ID 取行，再 LayerNorm</small></div><span class="arrow">→</span><div class="node"><strong>Encoder × 10</strong><span class="shape" data-s="[128·seq, 384·hidden]
+→ [128·seq, 384·hidden]"></span><small>RoPE · 每 3 层 1 层全局 attention · gated GELU</small></div><span class="arrow">→</span><div class="node"><strong>Final LN + type</strong><span class="shape" data-s="[128·seq, 384·hidden]
++ type_emb 一行 [1, 384·hidden]"></span><small>按 question type 选 3 行之一</small></div><span class="arrow">→</span><div class="node"><strong>Decision × 2</strong><span class="shape" data-s="[128·seq, 384·hidden]
+→ [128·seq, 384·hidden]"></span><small>全局 attention · ReLU FFN · 带 bias</small></div></div>
+<div class="split"><div class="lane"><h3>选项分支（scorer）</h3><p class="shape" data-s="[128·seq, 384·hidden] → 每 token 一个分数 [128·seq, 1]
+→ 取 2 个 marker 位置的分数 → logits [2·option]"></p><p class="muted">先给全部 128 个 token 打分，再按 marker 位置取 2 个。</p></div><div class="lane"><h3>Action 分支</h3><p class="shape" data-s="CLS [1, 384·hidden] ‖ 概率特征 [1, 4·feature]
+→ [1, 388] → [1, 256] → logits [2·action]"></p><p class="muted">4 个特征：top1 概率、top1−top2、熵（bit）、选项数/255。</p></div></div>
+<h3>输入</h3><div class="table-wrap"><table><thead><tr><th>名称</th><th>shape</th><th>内容</th></tr></thead><tbody>
+<tr><td>meta<code>SMEM · scalar prefetch</code></td><td class="shape" data-s="[1179] = 9·repetition × 131"></td><td>每次 forward 131 个 int32：128 个 token ID，2 个 marker 位置，1 个 question type。</td></tr>
+<tr><td>mask</td><td class="shape" data-s="[9·repetition, 1, 128·seq]"></td><td>1 = 真实 token，0 = padding。</td></tr>
+<tr><td>权重</td><td class="shape" data-s="全部参数，矩阵存为 [in, out]"></td><td>kernel 输入，整块 DMA 进 VMEM。PyTorch 的 [out, in] 已在准备阶段转置；下文矩阵 shape 都是 kernel 里的 [in, out]。</td></tr>
+</tbody></table></div>
+<h3>VMEM scratch</h3><div class="table-wrap"><table><thead><tr><th>名称</th><th>shape · dtype</th><th>用途</th></tr></thead><tbody>
+<tr><td>xbuf</td><td class="shape" data-s="[128·seq, 384·hidden] FP32"></td><td>残差流。每层结束写回。</td></tr>
+<tr><td>qkv</td><td class="shape" data-s="[128·seq, 1152·qkv] BF16"></td><td>三次投影的结果（Q、K 已加 RoPE）。</td></tr>
+<tr><td>att</td><td class="shape" data-s="[384·head×dim, 128·query] BF16"></td><td>6 个 head 的 PV 输出，按 head 写入行 h·64 … h·64+63。注意是转置布局。</td></tr>
+<tr><td>score</td><td class="shape" data-s="[128·seq, 128·lane] FP32"></td><td>scorer 输出，只有 lane 0 有效。</td></tr>
+<tr><td>out</td><td class="shape" data-s="[9·repetition, 8·sublane, 128·lane] FP32"></td><td>kernel 输出。每次 forward 一个 [8,128] 块。</td></tr>
+</tbody></table></div>
+<h3>Embedding lookup（scope <code>embedding_lookup</code> / <code>embedding_token_group</code>）</h3>
+<p><strong>每次查表只查一个 token。</strong>查询的 key 是这个 token 的 ID（SMEM 里的一个标量），用它对 embedding 表做一次动态切片，读出 8 行对齐块。128 个 token 就是 128 次独立的单 token 查询。embed_group=8 只是把 8 次查询的结果拼成一块后一次写回 xbuf，不是把 8 个 ID 一起 gather。</p>
+<div class="diagram"><svg id="embed-diagram" role="img" aria-label="embedding lookup 数据流"></svg></div></section>
+
+<section id="layers"><h2>02 / 逐层展开</h2><p>点击一层查看它的步骤。每行是 trace 里的一个 scope：输入输出 shape、做什么计算、用哪个执行单元、本次 trace 的 p50。</p><div class="layer-buttons" id="layer-buttons"></div><div class="readout"><p id="layer-description"></p><div class="metric" id="layer-time"></div></div>
+<div class="note">残差路径：x → attention → +x → FFN → +。层输入和输出都是 <span class="shape" data-s="[128·seq, 384·hidden]"></span> FP32。局部 attention 层照样算完整的 [key, query]，只用 mask 挡住 |query−key| &gt; 64。</div>
+<h3>层结构图</h3><p class="muted small">实线是数据流，边上标着流过的张量 shape；绿色虚线是残差旁路；绿底框是 VMEM scratch；左侧虚线框是旁路输入。</p><div class="diagram"><svg id="layer-diagram" role="img" aria-label="单层数据流"></svg></div>
+<h3>代码对照</h3><p class="muted small">左边是这一层在 PyTorch / 参考模型里的 forward 写法，右边是 kernel 里实际执行的写法。注释里蓝色是 trace 的 scope 名，后面是该行输出的 shape。两边的差别：参考写法算 Q×Kᵀ 得 [query, key] 沿最后一维 softmax，kernel 算 K×Qᵀ 得 [key, query] 沿 axis 0 softmax，PV 结果直接是 [dim, query] 的转置布局。</p><div class="codes"><div class="code"><h4>PyTorch 写法<small id="code-ref-title"></small></h4><div id="code-ref" class="lines"></div></div><div class="code"><h4>kernel 实际写法<small>student32_vmem.py，去掉 scope 与循环样板</small></h4><div id="code-kernel" class="lines"></div></div></div>
+<h3>逐步骤表</h3><div class="table-wrap"><table><thead><tr><th>步骤 / scope</th><th>输入 → 输出</th><th>计算</th><th>执行单元</th><th>p50</th></tr></thead><tbody id="layer-steps"></tbody></table></div>
+<p class="muted small">步骤 p50 是各 scope 自身的时长，跨 12 层 × 24 次 forward 取中位数。编译器会把相邻 scope 的指令交错调度，所以步骤之和小于层时长。</p>
+<details open><summary>为什么 score 是 [key, query]，att 是 [head×dim, query]？</summary><p>每个 head 算 K × Qᵀ 得 <span class="shape" data-s="[128·key, 128·query]"></span>，softmax 沿 key（axis 0）。接着 Vᵀ × P 得 <span class="shape" data-s="[64·dim, 128·query]"></span>，直接写进 att 的 64 行。输出投影把 att 和 Wo 同时沿 axis 0（head×dim）收缩，结果回到 <span class="shape" data-s="[128·seq, 384·hidden]"></span>。这样 6 个 head 的结果不需要再转置就能拼起来（pv_transposed=true）。</p><p>head_group=6：6 个 head 的 QK 和 softmax 先全部发出，再依次做 6 个 PV，让 MXU 和 EUP 的工作交错。</p></details>
+<details><summary>LayerNorm 的每一步</summary><p class="shape" data-s="x [128·seq, 384·hidden]
+→ mean 沿 hidden → [128·seq, 1]（XLU 跨 lane 加）
+→ z = x − mean → [128·seq, 384·hidden]（VPU）
+→ var = mean(z²) 沿 hidden → [128·seq, 1]（VPU 乘 + XLU 加）
+→ rsqrt(var + 1e−5) → [128·seq, 1]（EUP）
+→ z × rsqrt × γ + β → [128·seq, 384·hidden]（VPU）"></p><p>encoder 的 norm 没有 β；decision 层和 scorer 的 norm 有。</p></details>
+<details><summary>FFN 宽度 576 → 640 的补零</summary><p>checkpoint 里 encoder Wi 是 <span class="shape" data-s="[1152, 384·hidden]"></span>（gate 576 行 + up 576 行），Wo 是 <span class="shape" data-s="[384·hidden, 576·ffn]"></span>。准备阶段把每支补零到 640 并转置：Wi → <span class="shape" data-s="[384·hidden, 1280·ffn]"></span>，Wo → <span class="shape" data-s="[640·ffn, 384·hidden]"></span>。GELU(0) × 0 = 0，补零列不改变结果。</p></details></section>
+
+<section id="heads"><h2>03 / 从 token 状态到决策</h2><p>decision 层结束后，xbuf <span class="shape" data-s="[128·seq, 384·hidden]"></span> 进入两个头。所有矩阵乘把输入转成 BF16，FP32 累加。</p><div class="table-wrap"><table><thead><tr><th>步骤 / scope</th><th>输入 → 输出</th><th>计算</th><th>执行单元</th><th>p50</th></tr></thead><tbody id="head-steps"></tbody></table></div></section>
+
+<section id="units"><h2>04 / 执行单元</h2><p>TPU TensorCore 的每条指令属于一个单元。下表的职责对应上面各步骤；opcode 一列是本次 trace 里该单元最常出现的指令。</p><div class="table-wrap"><table><thead><tr><th>单元</th><th>做什么</th><th>本模型里的用处</th><th>本次 trace 的 opcode</th></tr></thead><tbody id="unit-table"></tbody></table></div>
+<h3>各单元指令区间覆盖率</h3><p class="muted">24 次非 warmup 主体区间（embedding_norm 开始到 output_pack 结束）内，该单元的指令区间合并后占的时间比例。单元之间可以同时工作，所以各条不相加。</p><div class="bars" id="unit-bars"></div></section>
+
+<section id="evidence"><h2>05 / 本次采集</h2><div class="meta" id="trace-metrics"></div><div id="environment"></div><p>加 scope 前后 9,216 个输出元素逐位一致。统计窗口取 embedding_norm 开始到 output_pack 结束，不含 embedding lookup（导出器未保留外层 resident_forward scope）。</p>
+<details><summary>复现</summary><p>基线 <code>perf/student32-head-layout</code> @ <code>0d4971d</code>，本分支 <code>perf/student32-named-scopes</code>。参数 shape 读自 TPU checkpoint 的 safetensors 头部。</p><p><code>PYTHONPATH=src TPU_VISIBLE_CHIPS=0 TPU_PROCESS_BOUNDS=1,1,1 TPU_CHIPS_PER_PROCESS_BOUNDS=1,1,1 LIBTPU_INIT_ARGS="--xla_xprof_register_llo_debug_info=true --xla_xprof_enable_custom_call_tracing=true --xla_tpu_use_enhanced_launch_barrier=true" /home/junyi/laya-tpu/.venv/bin/python student32_resident_profile.py checkpoint --out scoped-trace --steps 3 --backends vmem --reference-kernel student32_uninstrumented.py</code></p><p><code>jax.profiler.trace</code> 采集 XSpace，xprof-nightly 的 <code>xspace_to_tool_data(..., "trace_viewer@")</code> 转成 Chrome trace JSON。Perfetto 要求同一轨道内的事件要么不重叠要么严格嵌套，所以本页内嵌的版本把事件分到并行显示行：完整落在父 scope 内的子 scope 留在同一行，只有真正交错的事件才换行。事件名、时间戳、时长不变。</p><p id="trace-hash" class="small"></p><p>参考：<a href="https://docs.jax.dev/en/latest/pallas/tpu/details.html">JAX TPU 执行与布局</a> · <a href="https://docs.jax.dev/en/latest/_autosummary/jax.named_scope.html">named_scope</a> · <a href="https://perfetto.dev/docs/visualization/deep-linking-to-perfetto-ui">Perfetto postMessage</a></p></details></section>
+
+<section id="perfetto"><h2>06 / 打开真实 trace</h2><div class="trace-box"><p>点击按钮打开 Perfetto 并通过 postMessage 载入本页内嵌的 trace。首次打开需要联网加载 Perfetto。</p><ol><li><strong>XLA TraceMe</strong> 轨道里找 <code>embedding_norm</code>，到对应 <code>output_pack</code> 结束是一次 forward 的主体。每个 kernel 的第一次 forward 是 warmup。</li><li>搜索 <code>encoder_00</code>、<code>decision_00</code>、<code>head_0_softmax</code> 等 scope 名。</li><li>展开 <strong>MXU0/1、VALU、EUP、XLU、VLD/VST Instructions</strong> 各 lane，对照 <strong>Framework Name Scope / Source code</strong> 看每个 scope 落在哪些指令上。选中时间片按 <strong>F</strong> 聚焦。lane 是显示行：同一时刻互相交错的事件各占一行，嵌套的 scope 在同一行内层叠。指令轨道里的层叠只表示时间区间包含，不是调用关系。</li></ol><button id="download">下载 trace</button><p class="status" id="status" role="status" aria-live="polite"></p><a class="button primary" id="open-perfetto" href="https://ui.perfetto.dev/">在 Perfetto 中打开 ↗</a></div></section><footer>Student32 · 2026-10-17</footer>
+</main><script id="summary-data" type="application/json">__SUMMARY__</script><script id="trace-data" type="application/octet-stream">__TRACE_BASE64__</script><script>
+const data=JSON.parse(document.getElementById('summary-data').textContent);
+const $=id=>document.getElementById(id);
+const fmt=s=>s.replace(/(\d+)·([^\s,\]\)]+)/g,'<b>$1</b><i>$2</i>');
+for(const el of document.querySelectorAll('[data-s]'))el.innerHTML=fmt(el.dataset.s);
+const st=data.scope_stats;
+const us=v=>v==null?'—':v.toFixed(3)+' μs';
+const t=scope=>{if(!scope)return '—';if(scope.includes('*')){const v=[0,1,2,3,4,5].map(h=>st[scope.replace('*',h)]?.p50_us).filter(x=>x!=null);return v.length?`${Math.min(...v).toFixed(3)}–${Math.max(...v).toFixed(3)} μs`:'—';}return us(st[scope]?.p50_us);};
+function drawFlow(svg,nodes){const W=1040,BX=240,BW=400,CX=BX+BW/2,LX=BX+BW+22,RX=1012,SX=10,SW=200;let y=14,depth=0;const out=[],groups=[],marks={};
+const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');const sv=s=>esc(s).replace(/(\d+)·([^\s,\]\)]+)/g,'<tspan class="n">$1</tspan><tspan class="ax">$2</tspan>');
+const text=(x,yy,s,cls,anchor='start')=>out.push(`<text x="${x}" y="${yy}" class="${cls}" text-anchor="${anchor}">${sv(s)}</text>`);
+const render=n=>{if(!n)return;
+if(n.t==='edge'){const lines=Array.isArray(n.shape)?n.shape:n.shape?[n.shape]:[],h=n.h||(lines.length>1?54:38);out.push(`<line x1="${CX}" y1="${y}" x2="${CX}" y2="${y+h-9}" class="e" marker-end="url(#ah)"/>`);lines.forEach((s,k)=>text(LX,y+h/2+3+(k-(lines.length-1)/2)*16,s,'lab'));if(n.fork){marks[n.fork]=y+7;out.push(`<circle cx="${CX}" cy="${y+7}" r="3.5" class="dot"/>`);}y+=h;}
+else if(n.t==='op'||n.t==='mem'){const two=n.scope||n.shape,h=two?50:36;out.push(`<rect x="${BX}" y="${y}" width="${BW}" height="${h}" rx="5" class="${n.t==='mem'?'mem':'b'}"/>`);text(CX,y+(two?21:23),n.name,'op','middle');if(n.scope)text(CX,y+39,n.scope,'scope','middle');if(n.shape)text(CX,y+39,n.shape,'lab','middle');
+if(n.side){const sy=y+h/2;out.push(`<rect x="${SX}" y="${sy-22}" width="${SW}" height="44" rx="5" class="side"/>`);text(SX+SW/2,sy-5,n.side[0],'op','middle');text(SX+SW/2,sy+12,n.side[1],'lab','middle');out.push(`<line x1="${SX+SW}" y1="${sy}" x2="${BX-7}" y2="${sy}" class="e" marker-end="url(#ah)"/>`);}y+=h;}
+else if(n.t==='op3'){const h=50,cw=(BW-12)/3;n.names.forEach((nm,j)=>{const x=BX+j*(cw+6);out.push(`<rect x="${x}" y="${y}" width="${cw}" height="${h}" rx="5" class="cell"/>`);text(x+cw/2,y+21,nm,'op','middle');text(x+cw/2,y+39,n.scopes[j],'scope','middle');});y+=h;}
+else if(n.t==='sum'){const r=14;y+=2;out.push(`<circle cx="${CX}" cy="${y+r}" r="${r}" class="sum"/><text x="${CX}" y="${y+r+5}" class="op" text-anchor="middle">+</text>`);text(CX-r-10,y+r+4,n.scope,'scope','end');const fy=marks[n.join];out.push(`<path d="M${CX} ${fy} H${RX} V${y+r} H${CX+r+9}" class="res" marker-end="url(#ah)"/>`);y+=2*r+2;}
+else if(n.t==='group'){const y0=y,d=depth++,gx=BX-22+9*d;y+=28;n.items.forEach(render);depth--;const y1=y+4;groups.unshift(`<rect x="${gx}" y="${y0}" width="${RX-gx-16}" height="${y1-y0}" rx="8" class="grp"/><text x="${gx+12}" y="${y0+18}" class="gl">${esc(n.label)}</text>`);y=y1+10;}};
+nodes.forEach(render);
+svg.setAttribute('viewBox',`0 0 ${W} ${y+6}`);svg.innerHTML=`<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#5b6868"/></marker></defs>`+groups.join('')+out.join('');}
+function layerFlow(i){const enc=i<10,local=enc&&i%3!==0,up=enc?'1280·ffn':'1536·ffn',mid=enc?'640·ffn':'1536·ffn';return [
+i===10?{t:'op',name:'encoder final LayerNorm，+ type_emb 第 qtype 行 [1, 384·hidden]',scope:'encoder_to_decision'}:null,
+i===10?{t:'edge',shape:'[128·seq, 384·hidden] FP32'}:null,
+{t:'mem',name:'xbuf',shape:'[128·seq, 384·hidden] FP32'},
+{t:'edge',shape:'x [128·seq, 384·hidden]',fork:'r1'},
+{t:'op',name:i===0?'LayerNorm（第 0 层跳过，y = x）':'LayerNorm 沿 hidden'+(enc?'':' · 有 β'),scope:i===0?'—':'attention_norm'},
+{t:'edge',shape:'y → BF16 [128·seq, 384·hidden]'},
+{t:'op3',names:['Q 投影','K 投影','V 投影'],scopes:['qkv_projection_0','qkv_projection_1','qkv_projection_2']},
+{t:'edge',shape:'各 × W[:, j·384…] [384·hidden, 384·head×dim]'+(enc?'':' + bias')},
+{t:'edge',h:30,shape:'z ×3 [128·seq, 384·head×dim] FP32 → BF16'},
+enc?{t:'op3',names:['RoPE','RoPE','—'],scopes:['rope_0','rope_1','V 不加位置']}:null,
+enc?{t:'edge',shape:'cos/sin [128·seq, 128·lane]，沿 lane 重复 3 次'}:null,
+{t:'mem',name:'qkv · lane 0–383 Q | 384–767 K | 768–1151 V',shape:'[128·seq, 1152·qkv] BF16'},
+{t:'group',label:'每个 head h，共 6 个（head_group=6：先 6 次 QK+softmax，再 6 次 PV）',items:[
+{t:'edge',shape:['q = qkv[:, h·64…] [128·query, 64·dim]','k = qkv[:, 384+h·64…] [128·key, 64·dim]']},
+{t:'op',name:'QK：k × (q / 8)ᵀ，沿 dim 收缩，+ mask bias',scope:'head_h_qk',side:['mask [1, 128·seq] → bias',local?'[128·key, 128·query] · |q−k| ≤ 64':'[128·key, 128·query] · 0 / −1e30']},
+{t:'edge',shape:'st [128·key, 128·query] FP32'},
+{t:'op',name:'softmax 沿 key（axis 0）：max、exp、sum、除',scope:'head_h_softmax'},
+{t:'edge',shape:'P [128·key, 128·query] FP32 → BF16'},
+{t:'op',name:'PV：vᵀ × P，沿 key 收缩',scope:'head_h_pv_store',side:['v = qkv[:, 768+h·64…]','[128·key, 64·dim] BF16']},
+{t:'edge',shape:['[64·dim, 128·query] FP32 → BF16','写入 att 行 h·64 … h·64+63']}]},
+{t:'mem',name:'att',shape:'[384·head×dim, 128·query] BF16'},
+{t:'edge',h:30},
+{t:'op',name:'输出投影 × Wo [384·head×dim, 384·hidden]'+(enc?'':' + bias'),scope:'attention_output_projection'},
+{t:'edge',shape:['[128·seq, 384·hidden] FP32','att 与 Wo 同沿 axis 0（head×dim）收缩']},
+{t:'sum',scope:'attention_residual',join:'r1'},
+{t:'edge',shape:'x [128·seq, 384·hidden] FP32',fork:'r2'},
+{t:'op',name:'LayerNorm 沿 hidden'+(enc?'':' · 有 β'),scope:'ffn_norm'},
+{t:'edge',shape:'y → BF16 [128·seq, 384·hidden]'},
+{t:'op',name:enc?'上投影 × Wi [384·hidden, 1280·ffn]（gate 640 | up 640）':'上投影 × W1 [384·hidden, 1536·ffn] + bias',scope:'ffn_up'},
+{t:'edge',shape:`[128·seq, ${up}] FP32`+(enc?' → BF16':'')},
+{t:'op',name:enc?'gated GELU：GELU_erf(lane 0–639) × lane 640–1279':'ReLU：max(y, 0)',scope:'ffn_activation'},
+{t:'edge',shape:`[128·seq, ${mid}] `+(enc?'BF16':'FP32 → BF16')},
+{t:'op',name:enc?'下投影 × Wo [640·ffn, 384·hidden]':'下投影 × W2 [1536·ffn, 384·hidden] + bias',scope:'ffn_down'},
+{t:'edge',shape:'down [128·seq, 384·hidden] FP32'},
+{t:'sum',scope:'ffn_residual',join:'r2'},
+{t:'edge',h:30},
+{t:'mem',name:'xbuf（写回）',shape:'[128·seq, 384·hidden] FP32'}];}
+const codeLine=([c,m])=>`<span>${c.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</span><span class="cm">${m?'# '+fmt(m.replace(/&/g,'&amp;').replace(/</g,'&lt;')).replace(/@(\w+)/g,'<span class="sc">$1</span>'):''}</span>`;
+function refCode(i){const enc=i<10,local=enc&&i%3!==0;const L=[];
+if(i===10)L.push(['x = final_norm(x) + type_emb[qtype]','@encoder_to_decision · [128·seq, 384·hidden]']);
+L.push([enc?'def encoder_layer(x, mask):':'def decision_layer(x, mask):','x: [128·seq, 384·hidden] FP32，batch 省略'],
+[i===0?'    y = x':enc?'    y = attn_norm(x)':'    y = norm1(x)',i===0?'第 0 层无 attn_norm':'@attention_norm · [128·seq, 384·hidden]'+(enc?'，无 bias':'，有 bias')],
+[enc?'    qkv = Wqkv(y).to(bf16)':'    qkv = in_proj(y).to(bf16)','@qkv_projection_0 ~ 2 · [128·seq, 1152·qkv]'+(enc?'':' + bias')],
+['    q, k, v = qkv.view(128, 3, 6, 64).unbind(1)','各 [128·seq, 6·head, 64·dim]'],
+enc?['    q, k = rope(q), rope(k)','@rope_0 @rope_1 · θ = 160000，rotate-half']:null,
+['    q, k, v = (t.transpose(0, 1) for t in (q, k, v))','各 [6·head, 128·seq, 64·dim]'],
+['    s = q @ k.mT / 8','@head_h_qk · [6·head, 128·query, 128·key]'],
+['    s = s.masked_fill(~allowed, -1e30)','@attention_mask · allowed = mask'+(local?' & |q−k| ≤ 64':'')],
+['    p = s.softmax(-1)','@head_h_softmax · 沿 key'],
+['    o = p @ v','@head_h_pv_store · [6·head, 128·query, 64·dim]'],
+['    o = o.transpose(0, 1).reshape(128, 384)','[128·seq, 384·head×dim]'],
+[enc?'    x = x + Wo(o)':'    x = x + out_proj(o)','@attention_output_projection @attention_residual · [128·seq, 384·hidden]'],
+enc?['    h = Wi(mlp_norm(x)).to(bf16)','@ffn_norm @ffn_up · [128·seq, 1152]，两支各 576']:['    h = linear1(norm2(x))','@ffn_norm @ffn_up · [128·seq, 1536·ffn] + bias'],
+enc?['    a, b = h.chunk(2, -1)','各 [128·seq, 576]']:null,
+enc?['    x = x + Wo2(gelu(a) * b)','@ffn_activation @ffn_down @ffn_residual · [128·seq, 384·hidden]']:['    x = x + linear2(relu(h))','@ffn_activation @ffn_down @ffn_residual · [128·seq, 384·hidden]'],
+['    return x','']);return L;}
+function kernelCode(i){const enc=i<10,local=enc&&i%3!==0;const L=[];
+if(i===10)L.push(['xbuf[...] = norm(xbuf[...], final_norm) + type_emb_row','@encoder_to_decision · type_emb_row = sum(where(iota == qtype, type_emb, 0), 0) · [128·seq, 384·hidden]']);
+L.push(['x = xbuf[...]','[128·seq, 384·hidden] FP32'],
+[i===0?'y = x':`y = norm(x, ${enc?'attn_norm':'norm1'})`,i===0?'第 0 层跳过':'@attention_norm · [128·seq, 384·hidden]'],
+['for j in range(3):','j = 0 Q，1 K，2 V'],
+['    z = dot(y.bf16, W[:, j*384:(j+1)*384])'+(enc?'':' + b[j]'),'@qkv_projection_j · [128·seq, 384·head×dim] FP32'],
+['    z = z.astype(bf16)',''],
+enc?['    if j < 2: z = rope(z, cos, sin)','@rope_j · roll 32 lane + cos/sin 乘加']:null,
+['    qkv[:, j*384:(j+1)*384] = z','写入 scratch qkv [128·seq, 1152·qkv] BF16'],
+[`bias = mask_bias(mask, (128, 128), window=${local?64:0})`,'@attention_mask · [128·key, 128·query]，0 / −1e30'],
+['for h in range(6):','head_group=6：先 6 个 QK + softmax'],
+['    q = qkv[:, h*64:(h+1)*64]','[128·query, 64·dim]'],
+['    k = qkv[:, 384+h*64:384+(h+1)*64]','[128·key, 64·dim]'],
+['    st = dot_general(k, q/8, contract dim) + bias','@head_h_qk · [128·key, 128·query] FP32'],
+['    P[h] = exp(st - st.max(0)) / exp(...).sum(0)','@head_h_softmax · 沿 key = axis 0'],
+['for h in range(6):','再 6 个 PV'],
+['    v = qkv[:, 768+h*64:768+(h+1)*64]','[128·key, 64·dim]'],
+['    att[h*64:(h+1)*64, :] = dot_general(v, P[h].bf16, contract key).bf16','@head_h_pv_store · [64·dim, 128·query] → scratch att [384·head×dim, 128·query]'],
+['proj = dot_general(att[...], Wo, contract axis 0 of both)'+(enc?'':' + bo'),'@attention_output_projection · [128·seq, 384·hidden] FP32'],
+['x = x + proj','@attention_residual'],
+[`y = norm(x, ${enc?'mlp_norm':'norm2'})`,'@ffn_norm · [128·seq, 384·hidden]'],
+enc?['y = dot(y.bf16, Wi)','@ffn_up · [128·seq, 1280·ffn] FP32，gate 640 | up 640']:['y = dot(y.bf16, W1) + b1','@ffn_up · [128·seq, 1536·ffn] FP32'],
+enc?['a, b = y.bf16[:, :640], y.bf16[:, 640:]','各 [128·seq, 640·ffn] BF16']:null,
+enc?['y = gelu(a.f32).bf16 * b','@ffn_activation · [128·seq, 640·ffn] BF16']:['y = maximum(y, 0)','@ffn_activation · [128·seq, 1536·ffn]'],
+enc?['down = dot(y, Wo2)','@ffn_down · [128·seq, 384·hidden] FP32']:['down = dot(y.bf16, W2) + b2','@ffn_down · [128·seq, 384·hidden] FP32'],
+['xbuf[...] = x + down','@ffn_residual · 写回 scratch xbuf']);return L;}
+drawFlow($('embed-diagram'),[
+{t:'mem',name:'meta（SMEM）· 每次 forward 131 个 int32',shape:'[1179] = 9·repetition × (128 ID + 2 marker + 1 type)'},
+{t:'group',label:'×16 组（embed_group=8），每组 8 个 token',items:[
+{t:'group',label:'×8：组内每个 token 各自独立查一次，查询 key 是它自己的 ID',items:[
+{t:'edge',shape:'ID = meta[offset + i]，一个 int32 标量'},
+{t:'op',name:'动态切片：取第 (ID − ID mod 8) 行起的 8 行',scope:'tok_embeddings[pl.ds(ID // 8 * 8, 8), :]',side:['tok_embeddings 表','[50368·vocab, 384·hidden] BF16']},
+{t:'edge',shape:'block [8·sublane, 384·hidden] BF16 → FP32'},
+{t:'op',name:'iota(axis 0) == ID mod 8 ? block : 0，再沿 axis 0 求和',scope:'select + sum'},
+{t:'edge',shape:['row [1, 384·hidden] FP32','= 这个 token 的 embedding']}]},
+{t:'op',name:'8 行 concat（axis 0）',scope:'embedding_token_group'},
+{t:'edge',shape:['[8·seq, 384·hidden] FP32','一次写入 xbuf[group·8 … group·8+7, :]']}]},
+{t:'mem',name:'xbuf',shape:'[128·seq, 384·hidden] FP32'},
+{t:'edge'},
+{t:'op',name:'LayerNorm 沿 hidden，无 β',scope:'embedding_norm'},
+{t:'edge',h:30},
+{t:'mem',name:'xbuf',shape:'[128·seq, 384·hidden] FP32 → 进入 encoder_00'}]);
+const row=([name,scope,io,calc,unit])=>`<tr><td>${name}<code>${scope||'—'}</code></td><td class="shape">${fmt(io)}</td><td class="calc">${fmt(calc)}</td><td class="unit">${unit}</td><td class="t">${t(scope)}</td></tr>`;
+function selectLayer(i){const enc=i<10,scope=enc?`encoder_${String(i).padStart(2,'0')}`:`decision_${String(i-10).padStart(2,'0')}`,local=enc&&i%3!==0;
+for(const b of $('layer-buttons').children)b.setAttribute('aria-pressed',String(Number(b.dataset.i)===i));
+$('layer-description').innerHTML=`<strong>${scope}</strong> · ${local?'局部双向 attention，|query−key| ≤ 64':'全局双向 attention'}<br>${enc?'RoPE θ=160000 · gated GELU FFN，每支 576 补到 640 · norm 无 bias，线性层无 bias':'无 RoPE · ReLU FFN 1536 · norm 与线性层都有 bias'}${i===0?' · 第 0 层没有 attention 前的 LayerNorm':''}${i===10?' · 层开始前先做 encoder final LN 并加 type embedding':''}`;
+$('layer-time').innerHTML=`${st[scope].p50_us.toFixed(3)} μs<small>层 scope p50 · ${st[scope].count} 次</small>`;
+const bias=enc?'':' + bias [1, 384·hidden]';
+const steps=[];
+if(i===10)steps.push(['Final LN + type embedding','encoder_to_decision','xbuf [128·seq, 384·hidden]\n→ xbuf [128·seq, 384·hidden]','encoder final LayerNorm；type_emb [3·type, 384·hidden] 用 iota == qtype 选一行、沿 axis 0 求和得 [1, 384·hidden]，沿 seq 广播相加。','VPU + XLU + EUP']);
+steps.push(['Attention LayerNorm',i===0?null:'attention_norm','x [128·seq, 384·hidden]\n→ y [128·seq, 384·hidden]',i===0?'第 0 层跳过，y = x。':`沿 hidden 求 mean、var，rsqrt，× γ${enc?'':' + β'}。`,i===0?'—':'VPU + XLU + EUP']);
+for(let j=0;j<3;j++){const n=['Q','K','V'][j];steps.push([`${n} 投影`,`qkv_projection_${j}`,`y→BF16 [128·seq, 384·hidden] × W[:, ${j*384}…${j*384+383}] [384·hidden, 384·head×dim]\n→ z [128·seq, 384·head×dim] FP32 → BF16`,`矩阵乘，取 Wqkv 的第 ${j} 段 384 列${bias ? '，加 bias' : ''}。${j===2||!enc?'结果写入 qkv 的 lane '+j*384+'…'+(j*384+383)+'。':''}`,'MXU'+(enc?' + VPU 转换':' + VPU bias/转换')]);
+if(enc&&j<2)steps.push([`${n} RoPE`,`rope_${j}`,'z [128·seq, 384·head×dim]\n→ qkv[:, lane '+j*384+'…'+(j*384+383)+'] [128·seq, 384·head×dim] BF16','每个 head 的 64 lane 内 rotate-half：roll 32 lane，前 32 lane 取负，得 [−x₂, x₁]；z × cos + rotated × sin。cos/sin 表 [128·seq, 128·lane] 沿 lane 重复 3 次覆盖 6 个 head。','XLU roll + VPU 乘加 + VST']);}
+steps.push(['Mask → 加性 bias','attention_mask','mask [1, 128·seq]\n→ bias [128·key, 128·query] FP32',`转置成 [128·key, 1] 后沿 query 广播；允许处 0，否则 −1e30。${local?'再要求 |query−key| ≤ 64。':''}`,'XLU 转置 + VPU 比较/选择'],
+['每个 head：QK','head_*_qk','q = qkv[:, h·64…] [128·query, 64·dim]\nk = qkv[:, 384+h·64…] [128·key, 64·dim]\n→ st [128·key, 128·query] FP32','k × (q / 8)ᵀ，沿 dim 收缩；加 mask bias。6 个 head 各一次。','MXU + VPU 缩放/加'],
+['每个 head：softmax','head_*_softmax','st [128·key, 128·query]\n→ P [128·key, 128·query] FP32','沿 key（axis 0）取 max → [1, 128·query]；exp(st − max)；沿 key 求和 → [1, 128·query]；相除。','VPU/XLU 沿 sublane 归约 + EUP exp、倒数'],
+['每个 head：PV 并写入','head_*_pv_store','v = qkv[:, 768+h·64…] [128·key, 64·dim]\nP→BF16 [128·key, 128·query]\n→ att[h·64…h·64+63, :] [64·dim, 128·query] BF16','vᵀ × P，沿 key 收缩，结果直接是转置布局，写入 att 第 h 个 64 行。','MXU + VPU 转换 + VST'],
+['Attention 输出投影','attention_output_projection','att [384·head×dim, 128·query] 与 Wo [384·head×dim, 384·hidden]\n→ [128·seq, 384·hidden] FP32',`两边同时沿 axis 0（head×dim）收缩，输出回到 [seq, hidden]${bias?'；加 bias':''}。`,'MXU'+(enc?'':' + VPU bias')],
+['Attention 残差','attention_residual','x + 投影结果\n→ x [128·seq, 384·hidden] FP32','逐元素加。','VPU'],
+['FFN LayerNorm','ffn_norm','x [128·seq, 384·hidden]\n→ y [128·seq, 384·hidden]',`沿 hidden 求 mean、var，rsqrt，× γ${enc?'':' + β'}。`,'VPU + XLU + EUP'],
+['FFN 上投影','ffn_up',enc?'y→BF16 [128·seq, 384·hidden] × Wi [384·hidden, 1280·ffn]\n→ [128·seq, 1280·ffn] FP32':'y→BF16 [128·seq, 384·hidden] × W1 [384·hidden, 1536·ffn]\n→ [128·seq, 1536·ffn] FP32',enc?'一次矩阵乘同时得到 gate 支和 up 支：lane 0–639 是 gate，640–1279 是 up，每支 640 中前 576 有效。':'矩阵乘，加 bias [1, 1536·ffn]。','MXU'+(enc?'':' + VPU bias')],
+[enc?'Gated GELU':'ReLU','ffn_activation',enc?'[128·seq, 1280·ffn] → BF16\na = lane 0–639, b = lane 640–1279，各 [128·seq, 640·ffn]\n→ GELU(a) × b [128·seq, 640·ffn] BF16':'[128·seq, 1536·ffn]\n→ max(y, 0) [128·seq, 1536·ffn] FP32',enc?'erf 版 GELU：0.5 × a × (1 + erf(a / √2))，在 FP32 算完转回 BF16 再乘 b。':'逐元素取 max。','VPU'+(enc?' + EUP erf':'')],
+['FFN 下投影','ffn_down',enc?'[128·seq, 640·ffn] BF16 × Wo [640·ffn, 384·hidden]\n→ down [128·seq, 384·hidden] FP32':'y→BF16 [128·seq, 1536·ffn] × W2 [1536·ffn, 384·hidden]\n→ down [128·seq, 384·hidden] FP32',`矩阵乘${bias?'，加 bias':''}。`,'MXU'+(enc?'':' + VPU bias')],
+['FFN 残差','ffn_residual','x + down\n→ xbuf [128·seq, 384·hidden] FP32','逐元素加，写回 xbuf。','VPU + VST']);
+$('layer-steps').innerHTML=steps.map(row).join('');drawFlow($('layer-diagram'),layerFlow(i));$('code-ref-title').textContent=enc?'ModernBERT 层，src/deciax/models/modernbert.py 的写法':'nn.TransformerEncoderLayer(norm_first=True, relu)，src/deciax/models/laya/heads.py 的写法';$('code-ref').innerHTML=refCode(i).filter(Boolean).map(codeLine).join('');$('code-kernel').innerHTML=kernelCode(i).filter(Boolean).map(codeLine).join('');}
+for(let i=0;i<12;i++){const b=document.createElement('button');b.textContent=i<10?`E${i}`:`D${i-10}`;b.dataset.i=i;b.onclick=()=>selectLayer(i);$('layer-buttons').append(b);}selectLayer(0);
+$('head-steps').innerHTML=[
+['Scorer LayerNorm','scorer_norm','xbuf [128·seq, 384·hidden]\n→ [128·seq, 384·hidden]','沿 hidden 求 mean、var，rsqrt，× γ + β。','VPU + XLU + EUP'],
+['Scorer 线性层','scorer_up','→BF16 [128·seq, 384·hidden] × W [384·hidden, 384]\n→ [128·seq, 384] FP32','矩阵乘，加 bias [1, 384]。','MXU + VPU bias'],
+['Scorer GELU','scorer_gelu','[128·seq, 384] → [128·seq, 384]','erf 版 GELU。','VPU + EUP erf'],
+['Scorer 输出','scorer_down','→BF16 [128·seq, 384] × W [384, 128·lane]\n→ score [128·seq, 128·lane] FP32','逻辑上 W 是 [384, 1]，补零到 128 lane；只有 lane 0 是分数。加 bias，写入 score scratch。','MXU + VPU bias + VST'],
+['取 2 个 marker 的分数','option_marker_gather','score [128·seq, 128·lane]\n→ a, b 各 [1, 1]','对每个 marker 位置 idx：读 8 行对齐块 [8·sublane, 128·lane]，iota == idx mod 8 选一行并沿 axis 0 求和 → [1, 128·lane]；再沿 lane 求和得标量（只有 lane 0 非零）。','VLD + VPU 选择 + XLU 跨 lane 加'],
+['选项 softmax','option_softmax','a, b [1, 1] → pa, pb [1, 1]','shift = max(a, b)；exp(a − shift)、exp(b − shift)；除以两者之和。','VPU + EUP exp、倒数'],
+['决策特征','decision_features','pa, pb → feats [1, 128·lane]','lane 0 = max(pa, pb)，lane 1 = |pa − pb|，lane 2 = 熵 −Σp·log₂p，lane 3 = 2/255，其余 0。','VPU + EUP log'],
+['拼接 CLS','action_concat','xbuf[0] [1, 384·hidden] ‖ feats [1, 128·lane]\n→ [1, 512]','token 0（CLS）的 hidden 接上特征。逻辑宽度 388 = 384 + 4。','VLD + 布局'],
+['Action 线性层','action_up','→BF16 [1, 512] × W [512, 256]\n→ [1, 256] FP32','W 的第 388–511 行为零。加 bias [1, 256]。','MXU + VPU bias'],
+['Action GELU','action_gelu','[1, 256] → [1, 256]','erf 版 GELU。','VPU + EUP erf'],
+['Action 输出','action_down','→BF16 [1, 256] × W [256, 128·lane]\n→ act [1, 128·lane] FP32','逻辑上 W 是 [256, 2]，补零到 128 lane；lane 0、1 是两个 action 的 logit。加 bias。','MXU + VPU bias'],
+['输出打包','output_pack','→ out[r] [8·sublane, 128·lane] FP32','行 0 = a 广播到 128 lane，行 1 = b 广播，行 2 = act，行 3–7 = 0。r 是本次 repetition。','VST']].map(row).join('');
+const roles={
+'MXU0':['矩阵乘流水线 0。vmatprep 装入权重，vmatpush 推入输入行，vmatmul 乘，vpop 取回累加结果。','所有线性投影、QK、PV。两条 MXU 由编译器分配。'],
+'MXU1':['矩阵乘流水线 1，同上。','同上。'],
+'VALU':['向量算术（VPU）：逐元素加、乘、比较、选择，以及 dtype 转换（vpack = FP32 → BF16 打包）。','残差加、mask 选择、LN 的减均值与缩放、GELU 的多项式部分、bias、BF16 转换。'],
+'EUP':['超越函数：pow2（exp）、erf、rsqrt、rcp（倒数）。结果通过 vpop.eup 取回。','softmax 的 exp 与除法、GELU 的 erf、LayerNorm 的 rsqrt。'],
+'XLU':['跨 lane 操作：permute、lane 旋转（vrot.lane）、转置（vxpose）、跨 lane 归约（vadd.xlane）。','RoPE 的 roll、LayerNorm 沿 hidden 的求和、mask 转置、att 布局调整。'],
+'VLD':['VMEM → 向量寄存器。','读 xbuf、qkv、att、权重块。'],
+'VST':['向量寄存器 → VMEM。vst.msk 是带掩码存储，只写部分行或列。','写 qkv、att、xbuf、score、out。'],
+'SALU':['标量单元：循环计数、SMEM 读取（sld）、地址计算（scalar_lea）。','fori_loop 控制、从 meta 读 token ID、marker 位置、question type。']};
+const order=['MXU0','MXU1','VALU','EUP','XLU','VLD','VST','SALU'];
+const units=[...data.units].sort((a,b)=>order.indexOf(a.name.split(' ')[0])-order.indexOf(b.name.split(' ')[0]));
+$('unit-table').innerHTML=units.map(u=>{const k=u.name.split(' ')[0],r=roles[k]||['',''];return `<tr><td><strong>${k}</strong></td><td>${r[0]}</td><td>${r[1]}</td><td>${u.opcodes.slice(0,4).map(o=>`<code>${o[0]}</code>`).join('')}</td></tr>`;}).join('');
+$('unit-bars').innerHTML=units.map(u=>`<div class="bar-row"><span>${u.name.replace(' Instructions','')}</span><div class="bar"><i style="width:${u.coverage*100}%"></i></div><span>${(u.coverage*100).toFixed(1)}%</span></div>`).join('');
+$('trace-metrics').innerHTML=[[data.modules,'kernel 调用'],[data.warm_forwards,'非 warmup forward'],[data.p50_us.toFixed(3)+' μs','forward 主体 p50'],[data.events.toLocaleString(),'trace events'],[(data.perfetto_bytes/1048576).toFixed(1)+' MiB','内嵌压缩 trace']].map(([v,t])=>`<div><strong>${v}</strong><span>${t}</span></div>`).join('');
+$('environment').innerHTML=`<p><strong>版本：</strong>${Object.entries(data.environment.versions).map(([k,v])=>`<code>${k} ${v}</code>`).join(' · ')}</p><p><strong>配置：</strong>TRACE_COMPUTE_AND_SYNC · embed_group=8 · head_group=6 · pv_transposed=true</p>`;
+$('trace-hash').textContent='原始 trace SHA-256: '+data.trace_sha256+'；分轨版本 SHA-256: '+data.perfetto_sha256;
+let traceBytes;function getTrace(){if(!traceBytes){const raw=atob($('trace-data').textContent.trim());traceBytes=Uint8Array.from(raw,c=>c.charCodeAt(0));}return traceBytes;}
+$('download').onclick=()=>{const url=URL.createObjectURL(new Blob([getTrace()],{type:'application/gzip'}));const a=document.createElement('a');a.href=url;a.download='student32-named-scopes.perfetto.trace.json.gz';a.click();setTimeout(()=>URL.revokeObjectURL(url),10000);};
+let active=false;$('open-perfetto').onclick=e=>{e.preventDefault();if(active)return;const target=window.open('https://ui.perfetto.dev/','student32-perfetto');if(!target){$('status').textContent='弹窗被阻止。允许弹窗后重试，或下载 trace 手动打开。';return;}active=true;$('status').textContent='等待 Perfetto 就绪…';const origin='https://ui.perfetto.dev';let timer,timeout;const cleanup=()=>{clearInterval(timer);clearTimeout(timeout);window.removeEventListener('message',onMessage);active=false;};const onMessage=event=>{if(event.source!==target||event.origin!==origin||event.data!=='PONG')return;cleanup();try{const buffer=getTrace().slice().buffer;target.postMessage({perfetto:{buffer,title:'Student32 · named scopes · TPU v6e',fileName:'student32-named-scopes.perfetto.trace.json.gz'}},origin,[buffer]);$('status').textContent='已发送到 Perfetto。若弹出来源确认，点击 Open trace。';}catch(error){$('status').textContent='传递失败：'+error.message+'。请使用下载按钮。';}};window.addEventListener('message',onMessage);timer=setInterval(()=>{if(target.closed){cleanup();$('status').textContent='Perfetto 窗口已关闭。';}else target.postMessage('PING',origin);},250);timeout=setTimeout(()=>{cleanup();$('status').textContent='Perfetto 加载超时。请重试或下载 trace 手动打开。';},120000);};
+</script></body></html>

@@ -8,6 +8,7 @@ Baselines use hot compiled calls and device XLA Modules intervals, not host time
 import argparse
 import gzip
 import importlib.metadata
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -33,6 +34,7 @@ def main():
     ap.add_argument("--embed-group", type=int, choices=(1, 8, 16, 32, 64, 128), default=8)
     ap.add_argument("--head-group", type=int, choices=(1, 2, 3, 4, 6), default=6)
     ap.add_argument("--pv-transposed", action=argparse.BooleanOptionalAction, default=True)
+    ap.add_argument("--reference-kernel", type=Path, help="Uninstrumented student32_vmem.py for bitwise validation")
     args = ap.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "environment.json").write_text(
@@ -100,6 +102,35 @@ def main():
     vm = fn.lower(*inputs).compile()
     (args.out / "vmem.hlo.txt").write_text(vm.as_text())
     actual = np.asarray(vm(*inputs))
+    if args.reference_kernel:
+        spec = importlib.util.spec_from_file_location("student32_reference", args.reference_kernel)
+        reference_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(reference_module)
+        reference_fn = (
+            reference_module.build(
+                data,
+                128,
+                len(stream),
+                80,
+                stream=True,
+                embed_group=args.embed_group,
+                head_group=args.head_group,
+                pv_transposed=args.pv_transposed,
+            )
+            .lower(*inputs)
+            .compile()
+        )
+        np.testing.assert_array_equal(actual, np.asarray(reference_fn(*inputs)))
+        (args.out / "scope-validation.json").write_text(
+            json.dumps(
+                {
+                    "uninstrumented_bitwise_equal": True,
+                    "outputs_compared": int(actual.size),
+                    "reference_kernel": str(args.reference_kernel),
+                },
+                indent=2,
+            )
+        )
     original = build(data, 128, len(stream), 80, stream=True, embed_group=1, head_group=1, pv_transposed=False).lower(*inputs).compile()
     original_output = np.asarray(original(*inputs))
     # Reordering must preserve all output lanes, including the action head.

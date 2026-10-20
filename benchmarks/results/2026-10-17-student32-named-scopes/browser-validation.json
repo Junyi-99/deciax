@@ -1,0 +1,14 @@
+{
+  "perfetto_sha256": "6b5049be5cf275eb1a791bd692f25fa9853e6a2d3d8276133f613692325e681c",
+  "perfetto_version": "v58.3-11fbaed83",
+  "html_layer_switch": "H0 selected: decision_00, ReLU 1536, no RoPE",
+  "postmessage_load": "Verified in Chrome from HTML button",
+  "import_errors": 0,
+  "trace_errors": 0,
+  "data_losses": 0,
+  "selected_scope": "encoder_00",
+  "scope_search_matches": 27,
+  "selected_start_ns": 19703213,
+  "selected_duration_ns": 5258,
+  "note": "Initial compatible import explicitly showed all health counters zero; final display-order revision loaded without an error banner and encoder_00 was selected and zoomed. Display lanes do not represent hardware lanes."
+}

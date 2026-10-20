@@ -1,0 +1,477 @@
+{
+  "trace_sha256": "19255aff2271a25f0c2671bdf2927c1f742be80e1fae4f8d861c40e2ce147c86",
+  "trace_bytes": 10958036,
+  "events": 1955162,
+  "modules": 3,
+  "forwards": 27,
+  "forward_boundary": "embedding_norm start through output_pack end; EXCLUDES embedding lookup; raw trace unchanged",
+  "warm_forwards": 24,
+  "p50_us": 67.27187499999854,
+  "scope_stats": {
+    "embedding_norm": {
+      "count": 24,
+      "p50_us": 0.203164
+    },
+    "encoder_00": {
+      "count": 24,
+      "p50_us": 5.254961
+    },
+    "qkv_projection_0": {
+      "count": 288,
+      "p50_us": 0.211172
+    },
+    "rope_0": {
+      "count": 240,
+      "p50_us": 0.1375
+    },
+    "qkv_projection_1": {
+      "count": 288,
+      "p50_us": 0.210078
+    },
+    "rope_1": {
+      "count": 240,
+      "p50_us": 0.137578
+    },
+    "qkv_projection_2": {
+      "count": 288,
+      "p50_us": 0.210078
+    },
+    "attention_mask": {
+      "count": 288,
+      "p50_us": 0.169922
+    },
+    "head_0_qk": {
+      "count": 288,
+      "p50_us": 0.1675
+    },
+    "head_0_softmax": {
+      "count": 288,
+      "p50_us": 0.0625
+    },
+    "head_1_qk": {
+      "count": 288,
+      "p50_us": 0.235156
+    },
+    "head_1_softmax": {
+      "count": 288,
+      "p50_us": 0.062422
+    },
+    "head_2_qk": {
+      "count": 288,
+      "p50_us": 0.16625
+    },
+    "head_2_softmax": {
+      "count": 288,
+      "p50_us": 0.062344
+    },
+    "head_3_qk": {
+      "count": 288,
+      "p50_us": 0.236172
+    },
+    "head_3_softmax": {
+      "count": 288,
+      "p50_us": 0.061328
+    },
+    "head_4_qk": {
+      "count": 288,
+      "p50_us": 0.166172
+    },
+    "head_4_softmax": {
+      "count": 288,
+      "p50_us": 0.061406
+    },
+    "head_5_qk": {
+      "count": 288,
+      "p50_us": 0.23511700000000002
+    },
+    "head_5_softmax": {
+      "count": 288,
+      "p50_us": 0.057578
+    },
+    "head_0_pv_store": {
+      "count": 288,
+      "p50_us": 0.177578
+    },
+    "head_1_pv_store": {
+      "count": 288,
+      "p50_us": 0.247578
+    },
+    "head_2_pv_store": {
+      "count": 288,
+      "p50_us": 0.177656
+    },
+    "head_3_pv_store": {
+      "count": 288,
+      "p50_us": 0.247656
+    },
+    "head_4_pv_store": {
+      "count": 288,
+      "p50_us": 0.178672
+    },
+    "head_5_pv_store": {
+      "count": 288,
+      "p50_us": 0.247578
+    },
+    "attention_output_projection": {
+      "count": 288,
+      "p50_us": 0.246172
+    },
+    "attention_residual": {
+      "count": 288,
+      "p50_us": 0.018672
+    },
+    "ffn_norm": {
+      "count": 288,
+      "p50_us": 0.199922
+    },
+    "ffn_up": {
+      "count": 288,
+      "p50_us": 0.34625
+    },
+    "ffn_activation": {
+      "count": 288,
+      "p50_us": 0.125
+    },
+    "ffn_down": {
+      "count": 288,
+      "p50_us": 0.285078
+    },
+    "ffn_residual": {
+      "count": 288,
+      "p50_us": 0.02
+    },
+    "encoder_01": {
+      "count": 24,
+      "p50_us": 5.473789
+    },
+    "attention_norm": {
+      "count": 264,
+      "p50_us": 0.205078
+    },
+    "encoder_02": {
+      "count": 24,
+      "p50_us": 5.46625
+    },
+    "encoder_03": {
+      "count": 24,
+      "p50_us": 5.510039000000001
+    },
+    "encoder_04": {
+      "count": 24,
+      "p50_us": 5.551289
+    },
+    "encoder_05": {
+      "count": 24,
+      "p50_us": 5.555039
+    },
+    "encoder_06": {
+      "count": 24,
+      "p50_us": 5.551797
+    },
+    "encoder_07": {
+      "count": 24,
+      "p50_us": 5.55
+    },
+    "encoder_08": {
+      "count": 24,
+      "p50_us": 5.553828
+    },
+    "encoder_09": {
+      "count": 24,
+      "p50_us": 5.480625
+    },
+    "decision_00": {
+      "count": 24,
+      "p50_us": 5.543164
+    },
+    "encoder_to_decision": {
+      "count": 24,
+      "p50_us": 0.2125
+    },
+    "decision_01": {
+      "count": 24,
+      "p50_us": 5.392539
+    },
+    "scorer_norm": {
+      "count": 24,
+      "p50_us": 0.24246099999999998
+    },
+    "scorer_up": {
+      "count": 24,
+      "p50_us": 0.247422
+    },
+    "scorer_gelu": {
+      "count": 24,
+      "p50_us": 0.042656
+    },
+    "scorer_down": {
+      "count": 24,
+      "p50_us": 0.168672
+    },
+    "option_marker_gather": {
+      "count": 24,
+      "p50_us": 0.098789
+    },
+    "option_softmax": {
+      "count": 24,
+      "p50_us": 0.022422
+    },
+    "decision_features": {
+      "count": 24,
+      "p50_us": 0.018594
+    },
+    "action_concat": {
+      "count": 24,
+      "p50_us": 0.001328
+    },
+    "action_up": {
+      "count": 24,
+      "p50_us": 0.1525
+    },
+    "action_gelu": {
+      "count": 24,
+      "p50_us": 0.013672
+    },
+    "action_down": {
+      "count": 24,
+      "p50_us": 0.131328
+    },
+    "output_pack": {
+      "count": 24,
+      "p50_us": 0.001953
+    }
+  },
+  "units": [
+    {
+      "name": "SALU Instructions",
+      "coverage": 3.251760806801819e-05,
+      "opcodes": [
+        [
+          "smov",
+          72
+        ],
+        [
+          "scalar_lea",
+          24
+        ],
+        [
+          "sld",
+          24
+        ]
+      ]
+    },
+    {
+      "name": "VALU Instructions",
+      "coverage": 0.1026200552723401,
+      "opcodes": [
+        [
+          "vadd.f32",
+          176071
+        ],
+        [
+          "vmul.f32",
+          130411
+        ],
+        [
+          "vpack",
+          65582
+        ],
+        [
+          "vsel",
+          37264
+        ],
+        [
+          "vmul.bf16",
+          34903
+        ],
+        [
+          "vpop.eup",
+          33159
+        ]
+      ]
+    },
+    {
+      "name": "EUP Instructions",
+      "coverage": 0.011467261722036966,
+      "opcodes": [
+        [
+          "vpow2.f32",
+          15871
+        ],
+        [
+          "verf.f32",
+          12442
+        ],
+        [
+          "vrsqrt.f32",
+          5459
+        ],
+        [
+          "vrcp.f32",
+          996
+        ]
+      ]
+    },
+    {
+      "name": "XLU Instructions",
+      "coverage": 0.04992229521677462,
+      "opcodes": [
+        [
+          "vpop.permute",
+          35280
+        ],
+        [
+          "vrot.lane",
+          32611
+        ],
+        [
+          "vpop.trf",
+          20131
+        ],
+        [
+          "vxpose",
+          15342
+        ],
+        [
+          "vadd.xlane.f32",
+          10887
+        ],
+        [
+          "vpop.xlane",
+          10757
+        ]
+      ]
+    },
+    {
+      "name": "VLD Instructions",
+      "coverage": 0.043048730522954125,
+      "opcodes": [
+        [
+          "vld",
+          250176
+        ]
+      ]
+    },
+    {
+      "name": "VST Instructions",
+      "coverage": 0.027448205860311742,
+      "opcodes": [
+        [
+          "vst",
+          99814
+        ],
+        [
+          "vst.msk",
+          15348
+        ]
+      ]
+    },
+    {
+      "name": "MXU0 Instructions",
+      "coverage": 0.09506880099528582,
+      "opcodes": [
+        [
+          "vpop",
+          85366
+        ],
+        [
+          "vmatprep.subr",
+          32467
+        ],
+        [
+          "vmatprep.mubr",
+          19663
+        ],
+        [
+          "vmatmul.mubr",
+          19332
+        ],
+        [
+          "vmatpush3",
+          15194
+        ],
+        [
+          "vmatpush1",
+          13880
+        ]
+      ]
+    },
+    {
+      "name": "MXU1 Instructions",
+      "coverage": 0.09272514780422035,
+      "opcodes": [
+        [
+          "vpop",
+          83060
+        ],
+        [
+          "vmatprep.subr",
+          31055
+        ],
+        [
+          "vmatprep.mubr",
+          19805
+        ],
+        [
+          "vmatmul.mubr",
+          19617
+        ],
+        [
+          "vmatpush3",
+          14930
+        ],
+        [
+          "vmatpush1",
+          13368
+        ]
+      ]
+    }
+  ],
+  "environment": {
+    "versions": {
+      "xprof-nightly": "2.24.2a20261002",
+      "jax": "0.11.2",
+      "jaxlib": "0.11.2",
+      "libtpu": "0.0.49"
+    },
+    "LIBTPU_INIT_ARGS": "--xla_xprof_register_llo_debug_info=true --xla_xprof_enable_custom_call_tracing=true --xla_tpu_use_enhanced_launch_barrier=true",
+    "modes": [
+      "TRACE_COMPUTE_AND_SYNC"
+    ],
+    "steps": 3,
+    "embed_group": 8,
+    "head_group": 6,
+    "pv_transposed": true
+  },
+  "validation": {
+    "uninstrumented_bitwise_equal": true,
+    "outputs_compared": 9216,
+    "reference_kernel": "student32_uninstrumented.py"
+  },
+  "interpretation": "LLO coverage is interpolated instruction-interval coverage, not measured utilization. Unit intervals overlap. Scope instrumentation can perturb scheduling and duration.",
+  "perfetto_sha256": "c0739e79b98ba771560d4532cfd84a93a39c03c7bffb3786b4c485438936344a",
+  "perfetto_bytes": 9554575,
+  "perfetto_lanes": {
+    "XLA Modules": 1,
+    "XLA TraceMe": 2,
+    "MXU0 Instructions": 2,
+    "MXU1 Instructions": 2,
+    "VALU Instructions": 1,
+    "EUP Instructions": 1,
+    "XLU Instructions": 2,
+    "VLD Instructions": 1,
+    "VST Instructions": 1,
+    "SALU Instructions": 1,
+    "Tensor Core Sync Flag": 1,
+    "XLA Ops": 1,
+    "Framework Name Scope": 1,
+    "Framework Ops": 1,
+    "Source code": 9,
+    "Pallas Primitives": 10,
+    "counters_0": 1,
+    "GrpcSystemStatsEvents": 1,
+    "main/3018499": 1,
+    "futex-default-SDomainT/3018722": 1,
+    "python": 1
+  }
+}

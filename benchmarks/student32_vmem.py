@@ -24,7 +24,7 @@ from deciax.protocol.types import parse_questions
 from deciax.runtime.buckets import collate
 
 
-def prepare(model, seq):
+def prepare(model, seq, *, fold_scale=True):
     p = model.params
     data = {}
 
@@ -44,6 +44,11 @@ def prepare(model, seq):
     for i in range(2):
         key = f"head.layers.{i}.self_attn.in_proj_weight"
         data[key] = p[key].T
+    if fold_scale:
+        # 1/sqrt(64) is a power of two, so scaling Q (and its bias) in bf16 is exact.
+        for key in [f"encoder.layers.{i}.attn.Wqkv.weight" for i in range(10)] + [f"head.layers.{i}.self_attn.in_proj_{n}" for i in range(2) for n in ("weight", "bias")]:
+            v = jnp.asarray(data[key])
+            data[key] = v.at[:, :384].multiply(jnp.asarray(0.125, v.dtype))
     # Padding for TPU lanes, preserving the true 388 input channels of act_head.
     data["act_head.0.weight"] = jnp.pad(p["act_head.0.weight"].T, ((0, 124), (0, 0)))
     for key in ("scorer.3", "act_head.2"):
@@ -56,14 +61,17 @@ def prepare(model, seq):
     return data
 
 
-def build(data, seq, repeats, vmem_mib, *, stream=False, embed_group=8, head_group=6, pv_transposed=True):
+def build(data, seq, repeats, vmem_mib, *, stream=False, embed_group=8, head_group=6, pv_transposed=True, action_batch=False, fold_scale=True, defer_norm=True):
     assert embed_group in (1, 8, 16, 32, 64, 128) and head_group in (1, 2, 3, 4, 6)
     assert seq % embed_group == 0
     names = tuple(data)
+    # Rows of f32 are padded to 8 sublanes; collect one action-head input per
+    # repetition so the two tiny matmuls run on full row tiles after the loop.
+    act_rows = -(-repeats // 8) * 8
 
     def kernel(meta, mask, *refs):
         p = dict(zip(names, refs[: len(names)]))
-        out, xbuf, qkv, att, score = refs[len(names) :]
+        out, xbuf, qkv, att, score, act_buf = refs[len(names) :]
 
         def val(k):
             return p[k][...]
@@ -80,9 +88,12 @@ def build(data, seq, repeats, vmem_mib, *, stream=False, embed_group=8, head_gro
 
         @jax.named_scope("resident_forward")
         def once(repetition, unused):
-            if stream:
-                pltpu.trace_value("request_index", repetition)
-            offset = repetition * (seq + 3)
+            # Explicit boundary remains visible when loop-parent scopes are
+            # omitted by the TPU trace exporter after adding nested scopes.
+            with jax.named_scope("forward_begin"):
+                if stream:
+                    pltpu.trace_value("request_index", repetition)
+                offset = repetition * (seq + 3)
 
             def embed(i, unused):
                 idx = meta[offset + i]
@@ -93,6 +104,7 @@ def build(data, seq, repeats, vmem_mib, *, stream=False, embed_group=8, head_gro
                 xbuf[pl.ds(i // 8 * 8, 8), :] = jnp.where(rows == i % 8, row, old)
 
             # Gather independent tokens in a group before one aligned output store.
+            @jax.named_scope("embedding_token_group")
             def embed_block(group, unused):
                 selected = []
                 for lane in range(embed_group):
@@ -102,95 +114,167 @@ def build(data, seq, repeats, vmem_mib, *, stream=False, embed_group=8, head_gro
                     selected.append(jnp.sum(jnp.where(rows == idx % 8, block, 0.0), axis=0, keepdims=True))
                 xbuf[pl.ds(group * embed_group, embed_group), :] = jnp.concatenate(selected, axis=0)
 
-            if embed_group > 1:
-                jax.lax.fori_loop(0, seq // embed_group, embed_block, None)
-            else:
-                jax.lax.fori_loop(0, seq, embed, None)
-            xbuf[...] = norm(xbuf[...], "encoder.embeddings.norm")
+            with jax.named_scope("embedding_lookup"):
+                if embed_group > 1:
+                    jax.lax.fori_loop(0, seq // embed_group, embed_block, None)
+                else:
+                    jax.lax.fori_loop(0, seq, embed, None)
+            with jax.named_scope("embedding_norm"):
+                xbuf[...] = norm(xbuf[...], "encoder.embeddings.norm")
             for layer in range(12):
-                enc = layer < 10
-                k = f"encoder.layers.{layer}" if enc else f"head.layers.{layer - 10}"
-                if layer == 10:
-                    xbuf[...] = norm(xbuf[...], "encoder.final_norm") + jnp.sum(
-                        jnp.where(jax.lax.broadcasted_iota(jnp.int32, (3, 384), 0) == meta[offset + seq + 2], val("type_emb.weight").astype(jnp.float32), 0.0),
-                        axis=0,
-                        keepdims=True,
-                    )
-                x = xbuf[...]
-                y = norm(x, k + (".attn_norm" if enc else ".norm1")) if layer != 0 else x
-                wkey = k + ".attn.Wqkv.weight" if enc else k + ".self_attn.in_proj_weight"
-                bkey = k + ".self_attn.in_proj_bias"
-                for j in range(3):
-                    cols = slice(j * 384, (j + 1) * 384)
-                    z = jnp.dot(y.astype(jnp.bfloat16), p[wkey][:, cols], preferred_element_type=jnp.float32)
-                    if not enc:
-                        z += p[bkey][:, cols].astype(jnp.float32)
-                    z = z.astype(jnp.bfloat16)
-                    if enc and j < 2:
-                        z = f._rope(z, val("cos"), val("sin"))
-                    qkv[:, cols] = z
-                bias = mask_bias(mask[repetition] if stream else mask[...], (seq, seq), 64 if enc and layer % 3 else 0)
-                # Expose independent softmax/QK work before consuming each PV.
-                for hg in range(0, 6, head_group):
-                    probabilities = []
-                    for h in range(hg, min(hg + head_group, 6)):
-                        q, kk = (qkv[:, head_cols(h, j * 384)] for j in range(2))
-                        st = scores_t(q, kk) + bias
-                        prob = jnp.exp(st - st.max(0, keepdims=True))
-                        probabilities.append(prob / prob.sum(0, keepdims=True))
-                    for h in range(hg, min(hg + head_group, 6)):
-                        v = qkv[:, head_cols(h, 2 * 384)]
-                        product = pv_t(v, probabilities[h - hg])
+                with jax.named_scope(f"encoder_{layer:02d}" if layer < 10 else f"decision_{layer - 10:02d}"):
+                    enc = layer < 10
+                    k = f"encoder.layers.{layer}" if enc else f"head.layers.{layer - 10}"
+                    with jax.named_scope("encoder_to_decision"):
+                        if layer == 10:
+                            xbuf[...] = norm(xbuf[...], "encoder.final_norm") + jnp.sum(
+                                jnp.where(
+                                    jax.lax.broadcasted_iota(jnp.int32, (3, 384), 0) == meta[offset + seq + 2], val("type_emb.weight").astype(jnp.float32), 0.0
+                                ),
+                                axis=0,
+                                keepdims=True,
+                            )
+                    x = xbuf[...]
+                    with jax.named_scope("attention_norm"):
+                        y = norm(x, k + (".attn_norm" if enc else ".norm1")) if layer != 0 else x
+                    wkey = k + ".attn.Wqkv.weight" if enc else k + ".self_attn.in_proj_weight"
+                    bkey = k + ".self_attn.in_proj_bias"
+                    for j in range(3):
+                        cols = slice(j * 384, (j + 1) * 384)
+                        with jax.named_scope(f"qkv_projection_{j}"):
+                            z = jnp.dot(y.astype(jnp.bfloat16), p[wkey][:, cols], preferred_element_type=jnp.float32)
+                        if not enc:
+                            z += p[bkey][:, cols].astype(jnp.float32)
+                        z = z.astype(jnp.bfloat16)
+                        if enc and j < 2:
+                            with jax.named_scope(f"rope_{j}"):
+                                z = f._rope(z, val("cos"), val("sin"))
+                        qkv[:, cols] = z
+                    with jax.named_scope("attention_mask"):
+                        bias = mask_bias(mask[repetition] if stream else mask[...], (seq, seq), 64 if enc and layer % 3 else 0)
+                    # Expose independent softmax/QK work before consuming each PV.
+                    for hg in range(0, 6, head_group):
+                        probabilities = []
+                        for h in range(hg, min(hg + head_group, 6)):
+                            q, kk = (qkv[:, head_cols(h, j * 384)] for j in range(2))
+                            with jax.named_scope(f"head_{h}_qk"):
+                                if fold_scale:
+                                    st = jax.lax.dot_general(kk, q, (((1,), (1,)), ((), ())), preferred_element_type=jnp.float32) + bias
+                                else:
+                                    st = scores_t(q, kk) + bias
+                            with jax.named_scope(f"head_{h}_softmax"):
+                                prob = jnp.exp(st - st.max(0, keepdims=True))
+                                if defer_norm:
+                                    probabilities.append((prob, 1 / prob.sum(0, keepdims=True)))
+                                else:
+                                    probabilities.append((prob / prob.sum(0, keepdims=True), None))
+                        for h in range(hg, min(hg + head_group, 6)):
+                            with jax.named_scope(f"head_{h}_pv_store"):
+                                v = qkv[:, head_cols(h, 2 * 384)]
+                                prob, inv = probabilities[h - hg]
+                                product = pv_t(v, prob)
+                                if inv is not None:
+                                    # Normalize the [64, tq] product instead of the [tk, tq] probabilities.
+                                    product = product * inv
+                                if pv_transposed:
+                                    att[head_cols(h), :] = product.astype(jnp.bfloat16)
+                                else:
+                                    att[:, head_cols(h)] = product.T.astype(jnp.bfloat16)
+                    with jax.named_scope("attention_output_projection"):
+                        output_key = k + (".attn.Wo" if enc else ".self_attn.out_proj")
                         if pv_transposed:
-                            att[head_cols(h), :] = product.astype(jnp.bfloat16)
+                            projected_att = jax.lax.dot_general(
+                                att[...], val(output_key + ".weight"), (((0,), (0,)), ((), ())), preferred_element_type=jnp.float32
+                            )
+                            if output_key + ".bias" in p:
+                                projected_att += val(output_key + ".bias").astype(jnp.float32)
                         else:
-                            att[:, head_cols(h)] = product.T.astype(jnp.bfloat16)
-                output_key = k + (".attn.Wo" if enc else ".self_attn.out_proj")
-                if pv_transposed:
-                    projected_att = jax.lax.dot_general(att[...], val(output_key + ".weight"), (((0,), (0,)), ((), ())), preferred_element_type=jnp.float32)
-                    if output_key + ".bias" in p:
-                        projected_att += val(output_key + ".bias").astype(jnp.float32)
-                else:
-                    projected_att = linear(att[...], output_key)
-                x = x + projected_att
-                y = norm(x, k + (".mlp_norm" if enc else ".norm2"))
-                y = linear(y, k + (".mlp.Wi" if enc else ".linear1"))
-                if enc:
-                    # Match unfused encoder's BF16 projection and activation semantics.
-                    y = y.astype(jnp.bfloat16)
-                    a, b = y[:, :640], y[:, 640:]
-                    y = f._gelu(a.astype(jnp.float32)).astype(jnp.bfloat16) * b
-                else:
-                    y = jnp.maximum(y, 0.0)
-                xbuf[...] = x + linear(y, k + (".mlp.Wo" if enc else ".linear2"))
-            score[...] = linear(f._gelu(linear(norm(xbuf[...], "scorer.0"), "scorer.1")), "scorer.3")
+                            projected_att = linear(att[...], output_key)
+                    with jax.named_scope("attention_residual"):
+                        x = x + projected_att
+                    with jax.named_scope("ffn_norm"):
+                        y = norm(x, k + (".mlp_norm" if enc else ".norm2"))
+                    with jax.named_scope("ffn_up"):
+                        y = linear(y, k + (".mlp.Wi" if enc else ".linear1"))
+                    with jax.named_scope("ffn_activation"):
+                        if enc:
+                            # Match unfused encoder's BF16 projection and activation semantics.
+                            y = y.astype(jnp.bfloat16)
+                            a, b = y[:, :640], y[:, 640:]
+                            y = f._gelu(a.astype(jnp.float32)).astype(jnp.bfloat16) * b
+                        else:
+                            y = jnp.maximum(y, 0.0)
+                    with jax.named_scope("ffn_down"):
+                        down = linear(y, k + (".mlp.Wo" if enc else ".linear2"))
+                    with jax.named_scope("ffn_residual"):
+                        xbuf[...] = x + down
+            with jax.named_scope("scorer_norm"):
+                normalized = norm(xbuf[...], "scorer.0")
+            with jax.named_scope("scorer_up"):
+                hidden = linear(normalized, "scorer.1")
+            with jax.named_scope("scorer_gelu"):
+                hidden = f._gelu(hidden)
+            with jax.named_scope("scorer_down"):
+                score[...] = linear(hidden, "scorer.3")
 
             def select_score(idx):
                 block = score[pl.ds(idx // 8 * 8, 8), :]
                 rows = jax.lax.broadcasted_iota(jnp.int32, (8, 128), 0)
                 return jnp.sum(jnp.where(rows == idx % 8, block, 0.0), axis=0, keepdims=True)
 
-            a = select_score(meta[offset + seq])
-            b = select_score(meta[offset + seq + 1])
-            # Only first column contains scores. Broadcast to lanes for scalar math.
-            a = jnp.sum(a, axis=1, keepdims=True)
-            b = jnp.sum(b, axis=1, keepdims=True)
-            shift = jnp.maximum(a, b)
-            pa, pb = jnp.exp(a - shift), jnp.exp(b - shift)
-            total = pa + pb
-            pa, pb = pa / total, pb / total
-            top = jnp.maximum(pa, pb)
-            entropy = -(pa * jnp.log(jnp.maximum(pa, 1e-9)) + pb * jnp.log(jnp.maximum(pb, 1e-9))) / jnp.log(2.0)
-            lane = jax.lax.broadcasted_iota(jnp.int32, (1, 128), 1)
-            feats = jnp.where(lane == 0, top, jnp.where(lane == 1, jnp.abs(pa - pb), jnp.where(lane == 2, entropy, jnp.where(lane == 3, 2 / 255.0, 0.0))))
-            act_input = jnp.concatenate((xbuf[:1, :], feats), axis=1)
-            act = linear(f._gelu(linear(act_input, "act_head.0")), "act_head.2")
-            out[repetition, 3:8, :] = jnp.zeros((5, 128), jnp.float32)
-            out[repetition, 0:1, :] = jnp.broadcast_to(a, (1, 128))
-            out[repetition, 1:2, :] = jnp.broadcast_to(b, (1, 128))
-            out[repetition, 2:3, :] = act
+            with jax.named_scope("option_marker_gather"):
+                a = select_score(meta[offset + seq])
+                b = select_score(meta[offset + seq + 1])
+                # Only first column contains scores. Broadcast to lanes for scalar math.
+                a = jnp.sum(a, axis=1, keepdims=True)
+                b = jnp.sum(b, axis=1, keepdims=True)
+            with jax.named_scope("option_softmax"):
+                shift = jnp.maximum(a, b)
+                pa, pb = jnp.exp(a - shift), jnp.exp(b - shift)
+                total = pa + pb
+                pa, pb = pa / total, pb / total
+            with jax.named_scope("decision_features"):
+                top = jnp.maximum(pa, pb)
+                entropy = -(pa * jnp.log(jnp.maximum(pa, 1e-9)) + pb * jnp.log(jnp.maximum(pb, 1e-9))) / jnp.log(2.0)
+                lane = jax.lax.broadcasted_iota(jnp.int32, (1, 128), 1)
+                feats = jnp.where(lane == 0, top, jnp.where(lane == 1, jnp.abs(pa - pb), jnp.where(lane == 2, entropy, jnp.where(lane == 3, 2 / 255.0, 0.0))))
+            with jax.named_scope("action_concat"):
+                act_input = jnp.concatenate((xbuf[:1, :], feats), axis=1)
+            if action_batch:
+                with jax.named_scope("action_row_store"):
+                    rows = jax.lax.broadcasted_iota(jnp.int32, (8, 512), 0)
+                    old = act_buf[pl.ds(repetition // 8 * 8, 8), :]
+                    act_buf[pl.ds(repetition // 8 * 8, 8), :] = jnp.where(rows == repetition % 8, act_input, old)
+            else:
+                with jax.named_scope("action_up"):
+                    act = linear(act_input, "act_head.0")
+                with jax.named_scope("action_gelu"):
+                    act = f._gelu(act)
+                with jax.named_scope("action_down"):
+                    act = linear(act, "act_head.2")
+            with jax.named_scope("output_pack"):
+                out[repetition, 3:8, :] = jnp.zeros((5, 128), jnp.float32)
+                out[repetition, 0:1, :] = jnp.broadcast_to(a, (1, 128))
+                out[repetition, 1:2, :] = jnp.broadcast_to(b, (1, 128))
+                if not action_batch:
+                    out[repetition, 2:3, :] = act
 
         jax.lax.fori_loop(0, repeats, once, None)
+        if action_batch:
+            # Rows past `repeats` are never copied to `out`, so they stay uninitialized.
+            with jax.named_scope("action_head_batched"):
+                for blk in range(act_rows // 8):
+                    with jax.named_scope("action_up"):
+                        act = linear(act_buf[blk * 8 : (blk + 1) * 8, :], "act_head.0")
+                    with jax.named_scope("action_gelu"):
+                        act = f._gelu(act)
+                    with jax.named_scope("action_down"):
+                        act = linear(act, "act_head.2")
+                    with jax.named_scope("output_pack"):
+                        for k in range(8):
+                            r = blk * 8 + k
+                            if r < repeats:
+                                out[r, 2:3, :] = act[k : k + 1, :]
 
     return jax.jit(
         pl.pallas_call(
@@ -205,6 +289,7 @@ def build(data, seq, repeats, vmem_mib, *, stream=False, embed_group=8, head_gro
                     pltpu.VMEM((seq, 1152), jnp.bfloat16),
                     pltpu.VMEM((384, seq) if pv_transposed else (seq, 384), jnp.bfloat16),
                     pltpu.VMEM((seq, 128), jnp.float32),
+                    pltpu.VMEM((act_rows, 512), jnp.float32),
                 ],
             ),
             compiler_params=pltpu.CompilerParams(vmem_limit_bytes=vmem_mib * 1024**2),
@@ -223,6 +308,9 @@ def main():
     ap.add_argument("--embed-group", type=int, choices=(1, 8, 16, 32, 64, 128), default=8)
     ap.add_argument("--head-group", type=int, choices=(1, 2, 3, 4, 6), default=6)
     ap.add_argument("--pv-transposed", action=argparse.BooleanOptionalAction, default=True)
+    ap.add_argument("--action-batch", action=argparse.BooleanOptionalAction, default=False)
+    ap.add_argument("--fold-scale", action=argparse.BooleanOptionalAction, default=True)
+    ap.add_argument("--defer-norm", action=argparse.BooleanOptionalAction, default=True)
     args = ap.parse_args()
     assert jax.default_backend() == "tpu" and len(jax.devices()) == 1
     print("device", jax.devices(), flush=True)
@@ -250,7 +338,7 @@ def main():
     ]
     encoded = [collate(model.encode(s, question), model.pad_token_id) for s in cases]
     seq = max(args.seq, max(x["input_ids"].shape[1] for x in encoded))
-    data = prepare(model, seq)
+    data = prepare(model, seq, fold_scale=args.fold_scale)
     print("layouts prepared", flush=True)
     fn = build(
         data,
@@ -260,6 +348,9 @@ def main():
         embed_group=args.embed_group,
         head_group=args.head_group,
         pv_transposed=args.pv_transposed,
+        action_batch=args.action_batch,
+        fold_scale=args.fold_scale,
+        defer_norm=args.defer_norm,
     )
     results = []
     exe = None
@@ -340,6 +431,9 @@ def main():
         "embed_group": args.embed_group,
         "head_group": args.head_group,
         "pv_transposed": args.pv_transposed,
+        "action_batch": args.action_batch,
+        "fold_scale": args.fold_scale,
+        "defer_norm": args.defer_norm,
         "resident_input_bytes": sum(x.size * x.dtype.itemsize for x in data.values()),
         "timing": timing,
         "protocol": "Compiled calls, synchronized host timing, 8 inputs x 10 measured cycles after 2 warmup cycles, rotating backend order; tokenization excluded. Full VMEM includes weight load per call.",

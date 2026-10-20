@@ -1,0 +1,17 @@
+{
+  "base_commit": "0d4971d7c0baf137efb8d844f25e189294e7ad51",
+  "branch": "perf/student32-named-scopes",
+  "remote_host": "tpu-v6e-1",
+  "remote_directory": "/home/junyi/student32-named-scopes-20261017",
+  "remote_profile": "scoped-trace/TRACE_COMPUTE_AND_SYNC/vmem",
+  "workload": "BF16, batch1, seq128, 2 options; 3 calls x 9 forwards; discard first forward per call",
+  "source_sha256": {
+    "benchmarks/student32_vmem.py": "9d946a1b7b125486a017d4841fa870dec208f9f5faab9012a20efe1d8e9f30b5",
+    "benchmarks/student32_resident_profile.py": "6d0434dd80df24f0d0f4f4be9d93425c539a6e11583504ff769337c12bcaea43"
+  },
+  "reference_kernel": "git show 0d4971d7c0baf137efb8d844f25e189294e7ad51:benchmarks/student32_vmem.py",
+  "raw_xspace": "Preserved in remote_profile/plugins/profile on remote host",
+  "generated_html": "Self-contained; embeds gzip trace; sends bytes to ui.perfetto.dev through postMessage; no public hosting required",
+  "perfetto_display_conversion": "Only changes display thread IDs and metadata; event names, timestamps, durations and args preserved. Original trace.json.gz retained.",
+  "analysis_window": "embedding_norm start to output_pack end; excludes embedding lookup because loop-boundary scopes are incompletely exported"
+}

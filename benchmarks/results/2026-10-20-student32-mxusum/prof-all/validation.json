@@ -1,0 +1,98 @@
+[
+  {
+    "input": "I love this product. It works wonderfully.",
+    "reference_logits": [
+      -0.9176251292228699,
+      -1.0112823247909546
+    ],
+    "vmem_logits": [
+      -0.9141536951065063,
+      -1.007938265800476
+    ],
+    "probability_max_abs": 3.17692756652832e-05
+  },
+  {
+    "input": "This is terrible. It broke on the first day.",
+    "reference_logits": [
+      1.682567834854126,
+      1.6467766761779785
+    ],
+    "vmem_logits": [
+      1.6888017654418945,
+      1.6546802520751953
+    ],
+    "probability_max_abs": 0.00041729211807250977
+  },
+  {
+    "input": "The package arrived this morning.",
+    "reference_logits": [
+      -0.23770979046821594,
+      -0.17564740777015686
+    ],
+    "vmem_logits": [
+      -0.2459426075220108,
+      -0.1676853895187378
+    ],
+    "probability_max_abs": 0.004043757915496826
+  },
+  {
+    "input": "I want a refund. This is the worst service ever.",
+    "reference_logits": [
+      2.1934573650360107,
+      2.249074935913086
+    ],
+    "vmem_logits": [
+      2.1913743019104004,
+      2.2475757598876953
+    ],
+    "probability_max_abs": 0.00014585256576538086
+  },
+  {
+    "input": "Absolutely excellent, thank you!",
+    "reference_logits": [
+      -0.6446492671966553,
+      -0.9288989305496216
+    ],
+    "vmem_logits": [
+      -0.6360388994216919,
+      -0.9282375574111938
+    ],
+    "probability_max_abs": 0.0019465386867523193
+  },
+  {
+    "input": "It is okay, neither great nor awful.",
+    "reference_logits": [
+      0.8258721232414246,
+      0.7841554880142212
+    ],
+    "vmem_logits": [
+      0.8538172841072083,
+      0.8107023239135742
+    ],
+    "probability_max_abs": 0.00034943222999572754
+  },
+  {
+    "input": "I am delighted with the quality and speed.",
+    "reference_logits": [
+      -0.8692699670791626,
+      -0.9614443778991699
+    ],
+    "vmem_logits": [
+      -0.8688856363296509,
+      -0.9656221866607666
+    ],
+    "probability_max_abs": 0.0011380314826965332
+  },
+  {
+    "input": "The customer service was rude and unhelpful.",
+    "reference_logits": [
+      0.8220111131668091,
+      0.832811713218689
+    ],
+    "vmem_logits": [
+      0.8223313093185425,
+      0.823823869228363
+    ],
+    "probability_max_abs": 0.0023269951343536377
+  }
+]

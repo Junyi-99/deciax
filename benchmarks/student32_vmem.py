@@ -24,7 +24,7 @@ from deciax.protocol.types import parse_questions
 from deciax.runtime.buckets import collate
 
 
-def prepare(model, seq):
+def prepare(model, seq, *, fold_scale=True):
     p = model.params
     data = {}
 
@@ -44,6 +44,11 @@ def prepare(model, seq):
     for i in range(2):
         key = f"head.layers.{i}.self_attn.in_proj_weight"
         data[key] = p[key].T
+    if fold_scale:
+        # 1/sqrt(64) is a power of two, so scaling Q (and its bias) in bf16 is exact.
+        for key in [f"encoder.layers.{i}.attn.Wqkv.weight" for i in range(10)] + [f"head.layers.{i}.self_attn.in_proj_{n}" for i in range(2) for n in ("weight", "bias")]:
+            v = jnp.asarray(data[key])
+            data[key] = v.at[:, :384].multiply(jnp.asarray(0.125, v.dtype))
     # Padding for TPU lanes, preserving the true 388 input channels of act_head.
     data["act_head.0.weight"] = jnp.pad(p["act_head.0.weight"].T, ((0, 124), (0, 0)))
     for key in ("scorer.3", "act_head.2"):
@@ -56,14 +61,17 @@ def prepare(model, seq):
     return data
 
 
-def build(data, seq, repeats, vmem_mib, *, stream=False, embed_group=8, head_group=6, pv_transposed=True):
+def build(data, seq, repeats, vmem_mib, *, stream=False, embed_group=8, head_group=6, pv_transposed=True, action_batch=False, fold_scale=True, defer_norm=True):
     assert embed_group in (1, 8, 16, 32, 64, 128) and head_group in (1, 2, 3, 4, 6)
     assert seq % embed_group == 0
     names = tuple(data)
+    # Rows of f32 are padded to 8 sublanes; collect one action-head input per
+    # repetition so the two tiny matmuls run on full row tiles after the loop.
+    act_rows = -(-repeats // 8) * 8
 
     def kernel(meta, mask, *refs):
         p = dict(zip(names, refs[: len(names)]))
-        out, xbuf, qkv, att, score = refs[len(names) :]
+        out, xbuf, qkv, att, score, act_buf = refs[len(names) :]
 
         def val(k):
             return p[k][...]
@@ -150,14 +158,24 @@ def build(data, seq, repeats, vmem_mib, *, stream=False, embed_group=8, head_gro
                         for h in range(hg, min(hg + head_group, 6)):
                             q, kk = (qkv[:, head_cols(h, j * 384)] for j in range(2))
                             with jax.named_scope(f"head_{h}_qk"):
-                                st = scores_t(q, kk) + bias
+                                if fold_scale:
+                                    st = jax.lax.dot_general(kk, q, (((1,), (1,)), ((), ())), preferred_element_type=jnp.float32) + bias
+                                else:
+                                    st = scores_t(q, kk) + bias
                             with jax.named_scope(f"head_{h}_softmax"):
                                 prob = jnp.exp(st - st.max(0, keepdims=True))
-                                probabilities.append(prob / prob.sum(0, keepdims=True))
+                                if defer_norm:
+                                    probabilities.append((prob, 1 / prob.sum(0, keepdims=True)))
+                                else:
+                                    probabilities.append((prob / prob.sum(0, keepdims=True), None))
                         for h in range(hg, min(hg + head_group, 6)):
                             with jax.named_scope(f"head_{h}_pv_store"):
                                 v = qkv[:, head_cols(h, 2 * 384)]
-                                product = pv_t(v, probabilities[h - hg])
+                                prob, inv = probabilities[h - hg]
+                                product = pv_t(v, prob)
+                                if inv is not None:
+                                    # Normalize the [64, tq] product instead of the [tk, tq] probabilities.
+                                    product = product * inv
                                 if pv_transposed:
                                     att[head_cols(h), :] = product.astype(jnp.bfloat16)
                                 else:
@@ -222,19 +240,41 @@ def build(data, seq, repeats, vmem_mib, *, stream=False, embed_group=8, head_gro
                 feats = jnp.where(lane == 0, top, jnp.where(lane == 1, jnp.abs(pa - pb), jnp.where(lane == 2, entropy, jnp.where(lane == 3, 2 / 255.0, 0.0))))
             with jax.named_scope("action_concat"):
                 act_input = jnp.concatenate((xbuf[:1, :], feats), axis=1)
-            with jax.named_scope("action_up"):
-                act = linear(act_input, "act_head.0")
-            with jax.named_scope("action_gelu"):
-                act = f._gelu(act)
-            with jax.named_scope("action_down"):
-                act = linear(act, "act_head.2")
+            if action_batch:
+                with jax.named_scope("action_row_store"):
+                    rows = jax.lax.broadcasted_iota(jnp.int32, (8, 512), 0)
+                    old = act_buf[pl.ds(repetition // 8 * 8, 8), :]
+                    act_buf[pl.ds(repetition // 8 * 8, 8), :] = jnp.where(rows == repetition % 8, act_input, old)
+            else:
+                with jax.named_scope("action_up"):
+                    act = linear(act_input, "act_head.0")
+                with jax.named_scope("action_gelu"):
+                    act = f._gelu(act)
+                with jax.named_scope("action_down"):
+                    act = linear(act, "act_head.2")
             with jax.named_scope("output_pack"):
                 out[repetition, 3:8, :] = jnp.zeros((5, 128), jnp.float32)
                 out[repetition, 0:1, :] = jnp.broadcast_to(a, (1, 128))
                 out[repetition, 1:2, :] = jnp.broadcast_to(b, (1, 128))
-                out[repetition, 2:3, :] = act
+                if not action_batch:
+                    out[repetition, 2:3, :] = act
 
         jax.lax.fori_loop(0, repeats, once, None)
+        if action_batch:
+            # Rows past `repeats` are never copied to `out`, so they stay uninitialized.
+            with jax.named_scope("action_head_batched"):
+                for blk in range(act_rows // 8):
+                    with jax.named_scope("action_up"):
+                        act = linear(act_buf[blk * 8 : (blk + 1) * 8, :], "act_head.0")
+                    with jax.named_scope("action_gelu"):
+                        act = f._gelu(act)
+                    with jax.named_scope("action_down"):
+                        act = linear(act, "act_head.2")
+                    with jax.named_scope("output_pack"):
+                        for k in range(8):
+                            r = blk * 8 + k
+                            if r < repeats:
+                                out[r, 2:3, :] = act[k : k + 1, :]
 
     return jax.jit(
         pl.pallas_call(
@@ -249,6 +289,7 @@ def build(data, seq, repeats, vmem_mib, *, stream=False, embed_group=8, head_gro
                     pltpu.VMEM((seq, 1152), jnp.bfloat16),
                     pltpu.VMEM((384, seq) if pv_transposed else (seq, 384), jnp.bfloat16),
                     pltpu.VMEM((seq, 128), jnp.float32),
+                    pltpu.VMEM((act_rows, 512), jnp.float32),
                 ],
             ),
             compiler_params=pltpu.CompilerParams(vmem_limit_bytes=vmem_mib * 1024**2),
@@ -267,6 +308,9 @@ def main():
     ap.add_argument("--embed-group", type=int, choices=(1, 8, 16, 32, 64, 128), default=8)
     ap.add_argument("--head-group", type=int, choices=(1, 2, 3, 4, 6), default=6)
     ap.add_argument("--pv-transposed", action=argparse.BooleanOptionalAction, default=True)
+    ap.add_argument("--action-batch", action=argparse.BooleanOptionalAction, default=False)
+    ap.add_argument("--fold-scale", action=argparse.BooleanOptionalAction, default=True)
+    ap.add_argument("--defer-norm", action=argparse.BooleanOptionalAction, default=True)
     args = ap.parse_args()
     assert jax.default_backend() == "tpu" and len(jax.devices()) == 1
     print("device", jax.devices(), flush=True)
@@ -294,7 +338,7 @@ def main():
     ]
     encoded = [collate(model.encode(s, question), model.pad_token_id) for s in cases]
     seq = max(args.seq, max(x["input_ids"].shape[1] for x in encoded))
-    data = prepare(model, seq)
+    data = prepare(model, seq, fold_scale=args.fold_scale)
     print("layouts prepared", flush=True)
     fn = build(
         data,
@@ -304,6 +348,9 @@ def main():
         embed_group=args.embed_group,
         head_group=args.head_group,
         pv_transposed=args.pv_transposed,
+        action_batch=args.action_batch,
+        fold_scale=args.fold_scale,
+        defer_norm=args.defer_norm,
     )
     results = []
     exe = None
@@ -384,6 +431,9 @@ def main():
         "embed_group": args.embed_group,
         "head_group": args.head_group,
         "pv_transposed": args.pv_transposed,
+        "action_batch": args.action_batch,
+        "fold_scale": args.fold_scale,
+        "defer_norm": args.defer_norm,
         "resident_input_bytes": sum(x.size * x.dtype.itemsize for x in data.values()),
         "timing": timing,
         "protocol": "Compiled calls, synchronized host timing, 8 inputs x 10 measured cycles after 2 warmup cycles, rotating backend order; tokenization excluded. Full VMEM includes weight load per call.",

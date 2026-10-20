@@ -34,6 +34,9 @@ def main():
     ap.add_argument("--embed-group", type=int, choices=(1, 8, 16, 32, 64, 128), default=8)
     ap.add_argument("--head-group", type=int, choices=(1, 2, 3, 4, 6), default=6)
     ap.add_argument("--pv-transposed", action=argparse.BooleanOptionalAction, default=True)
+    ap.add_argument("--action-batch", action=argparse.BooleanOptionalAction, default=False)
+    ap.add_argument("--fold-scale", action=argparse.BooleanOptionalAction, default=True)
+    ap.add_argument("--defer-norm", action=argparse.BooleanOptionalAction, default=True)
     ap.add_argument("--reference-kernel", type=Path, help="Uninstrumented student32_vmem.py for bitwise validation")
     args = ap.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
@@ -47,6 +50,9 @@ def main():
                 "embed_group": args.embed_group,
                 "head_group": args.head_group,
                 "pv_transposed": args.pv_transposed,
+                "action_batch": args.action_batch,
+                "fold_scale": args.fold_scale,
+                "defer_norm": args.defer_norm,
             },
             indent=2,
         )
@@ -87,7 +93,7 @@ def main():
     stream = [arrays[0], *arrays]  # index 0 warms compute; indices 1..8 vary the inputs.
     meta = jnp.concatenate([jnp.concatenate((a["input_ids"][0], a["marker_pos"][0, :2], a["qtype"])) for a in stream])
     masks = jnp.stack([a["attention_mask"] for a in stream])
-    data = prepare(model, 128)
+    data = prepare(model, 128, fold_scale=args.fold_scale)
     inputs = (meta, masks, *data.values())
     fn = build(
         data,
@@ -98,6 +104,9 @@ def main():
         embed_group=args.embed_group,
         head_group=args.head_group,
         pv_transposed=args.pv_transposed,
+        action_batch=args.action_batch,
+        fold_scale=args.fold_scale,
+        defer_norm=args.defer_norm,
     )
     vm = fn.lower(*inputs).compile()
     (args.out / "vmem.hlo.txt").write_text(vm.as_text())
@@ -116,7 +125,10 @@ def main():
                 embed_group=args.embed_group,
                 head_group=args.head_group,
                 pv_transposed=args.pv_transposed,
-            )
+                action_batch=args.action_batch,
+                fold_scale=args.fold_scale,
+                defer_norm=args.defer_norm,
+                    )
             .lower(*inputs)
             .compile()
         )
@@ -131,7 +143,7 @@ def main():
                 indent=2,
             )
         )
-    original = build(data, 128, len(stream), 80, stream=True, embed_group=1, head_group=1, pv_transposed=False).lower(*inputs).compile()
+    original = build(data, 128, len(stream), 80, stream=True, embed_group=1, head_group=1, pv_transposed=False, action_batch=args.action_batch, fold_scale=args.fold_scale, defer_norm=args.defer_norm).lower(*inputs).compile()
     original_output = np.asarray(original(*inputs))
     # Reordering must preserve all output lanes, including the action head.
     np.testing.assert_array_equal(actual, original_output)
